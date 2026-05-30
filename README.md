@@ -22,21 +22,32 @@ Every prototype re-rolled the same CSS v7 account-API dance (create account →
 pod → client-credentials) and its own pod I/O — ~10 copies. `mind` does it once,
 keeps a multi-identity store, and lets each prototype plug in as a command group.
 
-## Install / run
+## Install
 
-One install, then run (no build step — plain ESM):
+**One-liner** (recommended — requires Node.js ≥20):
 
 ```bash
-cd /Users/heussers/develop/mind/mind-prototypes/mind-cli
-npm install
-node bin/mind.mjs --help
+curl -fsSL https://raw.githubusercontent.com/MIND-Studio/mind-cli/main/install.sh | bash
 ```
 
-Put `mind` on your PATH:
+This fetches the latest release, installs its deps, and puts a `mind` launcher in
+`~/.local/bin`. Re-run it any time to update. Overridable via `MIND_CLI_REF`
+(pin a tag/branch), `MIND_CLI_HOME` (source dir), `MIND_CLI_BIN` (launcher dir).
+
+To inspect before running (it's `curl | bash`, after all):
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/MIND-Studio/mind-cli/main/install.sh -o install.sh
+less install.sh && bash install.sh
+```
+
+**From source** (for hacking on the CLI itself — no build step, plain ESM):
+
+```bash
+git clone https://github.com/MIND-Studio/mind-cli && cd mind-cli
+npm install
 npm link                       # gives you a global `mind`
-# (or)  alias mind='node /…/mind-cli/bin/mind.mjs'
+node bin/mind.mjs --help       # or run it directly
 ```
 
 **Stack:** [`citty`](https://github.com/unjs/citty) for the command layer
