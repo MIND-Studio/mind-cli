@@ -1,0 +1,37 @@
+{
+  "name": "@mind-studio/cli",
+  "version": "0.1.0",
+  "description": "mind — one CLI to manage Solid identities and drive Mind prototypes from the terminal. citty command layer, plugin seam for per-prototype command groups (codespaces, …).",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MIND-Studio/mind-cli.git"
+  },
+  "homepage": "https://github.com/MIND-Studio/mind-cli#readme",
+  "bugs": {
+    "url": "https://github.com/MIND-Studio/mind-cli/issues"
+  },
+  "bin": {
+    "mind": "./bin/mind.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "plugins",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "@inrupt/solid-client-authn-node": "^3.0.0",
+    "citty": "^0.1.6",
+    "cli-table3": "^0.6.5",
+    "ora": "^8.1.1",
+    "picocolors": "^1.1.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}
