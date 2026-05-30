@@ -53,10 +53,9 @@ node bin/mind.mjs --help       # or run it directly
 **Stack:** [`citty`](https://github.com/unjs/citty) for the command layer
 (typed args, auto-generated help, nested subcommands), `picocolors` + `cli-table3`
 + `ora` + `@clack/prompts` for output, and `@inrupt/solid-client-authn-node` for
-Solid auth. All real dependencies — `npm install` is required (it's no longer the
-zero-install borrow-from-sibling tool it was in 0.1). `solid.mjs` still falls back
-to a sibling's `@inrupt` install if its own is missing, but `citty`/styling are
-not borrowable.
+Solid auth. All real dependencies — `npm install` is required (the one-liner installer does
+this for you). `solid.mjs` still falls back to a sibling prototype's `@inrupt`
+install if its own is missing, but `citty`/styling are not borrowable.
 
 ## The identity store
 
