@@ -69,7 +69,7 @@ function locateAgents({ optional = false } = {}) {
   return { mind, root: dirname(mind), agentsDir: join(mind, "agents") };
 }
 
-function readPersonas(agentsDir) {
+export function readPersonas(agentsDir) {
   if (!agentsDir || !existsSync(agentsDir)) return [];
   return readdirSync(agentsDir)
     .filter((f) => f.endsWith(".md"))
@@ -212,10 +212,11 @@ const list = defineCommand({
         console.log(dim(loc ? `no personas in ${rel(loc.agentsDir)}/ — create <name>.md (frontmatter + system prompt)` : "no .mind/ here — nothing to launch"));
       } else {
         table(
-          ["persona", "backend", "description"],
+          ["persona", "backend", "model", "description"],
           personas.map((p) => [
             cyan(p.name),
             dim(p.backend ?? DEFAULT_BACKEND),
+            p.model || dim("—"),
             p.description || dim("—"),
           ]),
         );
