@@ -163,6 +163,7 @@ working directory. First plugin to shell out — `node:child_process.spawn` with
 | `mind agents list` | personas in `.mind/agents/` + which backends are on PATH (`--json` for scripts) |
 | `mind agents start <persona>` | interactive: hand over the backend's TUI with the persona injected |
 | `mind agents start <persona> -p "<task>"` | headless: run the task, print the result, exit (child's exit code propagates) |
+| `mind agents start <persona> --no-persona -p "<task>"` | launch the bare backend in the repo cwd; task/issue handling still works, but no system prompt is injected or read |
 | `mind agents start <persona> --issue MC-N` | **load a tracker issue** (ULID/`MC-N`/slug, or `next` for the top of the agent queue) as the task — folds its title+body into the prompt (loosely coupled: reads the issue, never claims/closes it). `--dry-run` prints the resolved backend/argv/task without spawning |
 
 Backends are **pluggable** (`--backend codex\|claude\|gemini`, or the persona's
