@@ -86,18 +86,31 @@ function readPersonas(agentsDir) {
 // at the persona file via a config override); claude takes the prompt as a string;
 // gemini reads it from an env var.
 
+/** codex has no system-prompt channel — fold the persona into the prompt itself. */
+export function composeCodexPrompt(personaText, task, interactive) {
+  const parts = [];
+  if (personaText)
+    parts.push(`[SYSTEM PERSONA — follow these instructions for the whole session]\n${personaText}`);
+  if (task) parts.push(task);
+  else if (personaText && interactive) parts.push("Acknowledge your role in one line, then wait for my instructions.");
+  return parts.join("\n\n---\n\n");
+}
+
 export const BACKENDS = {
   codex: {
     bin: "codex",
     install: "npm i -g @openai/codex  (https://github.com/openai/codex)",
-    // codex [PROMPT] (interactive) / codex exec [PROMPT] (headless). No system-prompt
-    // flag — inject the persona file via `-c experimental_instructions_file=<file>`.
-    build({ personaFile, task, model, interactive }) {
+    // codex [PROMPT] (interactive) / codex exec [PROMPT] (headless). codex has no
+    // system-prompt flag, and `-c experimental_instructions_file` is silently
+    // ignored in 0.135.x — so we PREPEND the persona to the prompt (verified to
+    // actually steer the model). Interactive with no task gets a benign ack line so
+    // the session starts in-persona and then waits for you.
+    build({ personaText, task, model, interactive }) {
       const args = [];
       if (!interactive) args.push("exec");
-      if (personaFile) args.push("-c", `experimental_instructions_file=${personaFile}`);
       if (model) args.push("-m", model);
-      if (task) args.push(task);
+      const prompt = composeCodexPrompt(personaText, task, interactive);
+      if (prompt) args.push(prompt);
       return { bin: "codex", args, env: {} };
     },
   },
