@@ -163,7 +163,8 @@ codespaces `tracker-build`), no bridge or server required:
 | `mind issues init [--title T] [--namespace IRI]` | scaffold a fresh `.mind/` tracker here |
 | `mind issues epic <title> [--status S]` | create an epic (a goal grouping issues) |
 | `mind issues new "<title>" --type T [--priority P] [--epic SLUG]` | create an issue (interactive if `<title>` omitted) |
-| `mind issues list [--state/--type/--priority/--epic/--label/--mine/--open/--closed]` | folded board, grouped by epic |
+| `mind issues list [--state/--type/--priority/--epic/--label/--mine/--open/--closed]` | folded list, grouped by epic (priority shown as a leading `↑`/`‼`/`↓` glyph) |
+| `mind issues board [same filters as list]` | kanban view: the same issues grouped into **state lanes** (workflow order), each tagged with its epic |
 | `mind issues next [--claim] [--all]` | pick the next claimable issue for an agent (priority then lowest-ULID; `--claim` claims it; `--all` shows the whole ranked queue, read-only) |
 | `mind issues show <ref>` | one issue: folded facts + body + event timeline |
 | `mind issues triage <ref> --to S [--labels a,b] [--blocks REF,…]` | append a triage event (`--blocks` refs accept any form — ULID/`MC-N`/`#N`/`N`/slug — and are rejected if they don't resolve) |
