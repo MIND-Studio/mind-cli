@@ -164,7 +164,7 @@ working directory. First plugin to shell out — `node:child_process.spawn` with
 | `mind agents start <persona>` | interactive: hand over the backend's TUI with the persona injected |
 | `mind agents start <persona> -p "<task>"` | headless: run the task, print the result, exit (child's exit code propagates) |
 | `mind agents start <persona> --no-persona -p "<task>"` | launch the bare backend in the repo cwd; task/issue handling still works, but no system prompt is injected or read |
-| `mind agents start <persona> --issue MC-N` | **load a tracker issue** (ULID/`MC-N`/slug, or `next` for the top of the agent queue) as the task — folds its title+body into the prompt (loosely coupled: reads the issue, never claims/closes it). `--dry-run` prints the resolved backend/argv/task without spawning |
+| `mind agents start <persona> --issue MC-N` | **load a tracker issue** (ULID/`MC-N`/slug, or `next` for the top of the agent queue) as the task — folds its title+body into the prompt, then **claims it** (→ `in-progress`, with the config ttl) so a re-run of `--issue next` advances to the next issue instead of re-picking this one. It never *closes* the issue — a human reviews and closes. Pass `--no-claim` to read the issue without touching tracker state, `--force` to steal a live claim, or `--dry-run` to print the resolved backend/argv/task (and whether it would claim) without spawning |
 
 Backends are **pluggable** (`--backend codex\|claude\|gemini`, or the persona's
 `backend:`; **codex** is the default). Persona injection differs per CLI: codex

@@ -109,3 +109,62 @@ test("agents start --no-persona dry-run launches bare codex and does not read a 
   assert.match(out, /\$ codex exec echo hi/);
   assert.doesNotMatch(out, /SYSTEM PERSONA|--append-system-prompt|GEMINI_SYSTEM_MD/);
 });
+
+test("agents start --issue claims the issue (→ in-progress) so the queue advances", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-claim-"));
+  // A fake `codex` on PATH so the launch is harmless (no model call): the claim
+  // happens before spawn, so all we need is an executable that exits 0.
+  const fakeBin = join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1", PATH: `${fakeBin}:${process.env.PATH}` };
+  const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+
+  // Scaffold a tracker, file an issue, hand it to agents.
+  assert.equal(run("issues", "init").status, 0);
+  const made = run("issues", "new", "fix the thing", "--type", "bug", "--json");
+  assert.equal(made.status, 0, made.stderr);
+  const handle = `MC-${JSON.parse(made.stdout).number}`; // e.g. MC-1
+  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
+
+  // A persona to launch with.
+  mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".mind", "agents", "coder.md"), "---\nbackend: codex\n---\nYou are coder.");
+
+  // Before: the issue is the head of the agent queue.
+  assert.match(run("issues", "next").stdout, new RegExp(handle));
+
+  // Launch the agent against it → should claim (→ in-progress), then run the fake codex.
+  const started = run("agents", "start", "coder", "--issue", "next");
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  assert.match(started.stderr + started.stdout, new RegExp(`claimed ${handle}`));
+
+  // After: the issue left the agent queue, and its state is in-progress.
+  const after = run("issues", "next");
+  assert.doesNotMatch(after.stdout, new RegExp(handle), "claimed issue must leave the agent queue");
+  const shown = JSON.parse(run("issues", "show", handle, "--json").stdout);
+  assert.equal(shown.issue.state, "in-progress");
+});
+
+test("agents start --issue --no-claim leaves the issue in the queue", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-noclaim-"));
+  const fakeBin = join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1", PATH: `${fakeBin}:${process.env.PATH}` };
+  const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+
+  assert.equal(run("issues", "init").status, 0);
+  const handle = `MC-${JSON.parse(run("issues", "new", "x", "--type", "bug", "--json").stdout).number}`;
+  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
+  mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".mind", "agents", "coder.md"), "---\nbackend: codex\n---\nYou are coder.");
+
+  const started = run("agents", "start", "coder", "--issue", "next", "--no-claim");
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  // Still claimable: no claim was written, state stays ready-for-agent.
+  assert.match(run("issues", "next").stdout, new RegExp(handle));
+  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "ready-for-agent");
+});

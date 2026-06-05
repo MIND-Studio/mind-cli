@@ -25,7 +25,8 @@ import {
 import { dirname, join, resolve, relative } from "node:path";
 import { getActive } from "../src/store.mjs";
 import { foldTracker } from "../src/tracker/fold.mjs";
-import { resolveIssue } from "../src/tracker/author.mjs";
+import { resolveIssue, appendEvent, assertClaimable, addDuration } from "../src/tracker/author.mjs";
+import { resolveActor } from "../src/tracker/actor.mjs";
 import { agentQueue } from "../src/tracker/queue.mjs";
 import { emit, table, guard, sym, green, red, cyan, yellow, dim, bold } from "../src/ui.mjs";
 
@@ -240,12 +241,15 @@ const start = defineCommand({
     backend: { type: "string", alias: "b", description: `codex|claude|gemini (default: persona's or ${DEFAULT_BACKEND})` },
     model: { type: "string", alias: "m", description: "model override" },
     "no-persona": { type: "boolean", description: "launch the backend bare without injecting or reading the persona prompt" },
+    "no-claim": { type: "boolean", description: "with --issue: don't claim the issue (leaves it in the agent queue)" },
+    force: { type: "boolean", description: "with --issue: steal a live claim held by someone else" },
     "dry-run": { type: "boolean", description: "print the resolved backend/argv/task and exit (no spawn)" },
   },
   run: guard(async ({ args, rawArgs }) => {
     const { agentsDir, root } = locateAgents();
     const file = join(agentsDir, `${args.persona}.md`);
     const noPersona = !!args["no-persona"] || rawArgs.includes("--no-persona");
+    const noClaim = !!args["no-claim"] || rawArgs.includes("--no-claim");
     if (!noPersona && !existsSync(file))
       throw new Error(`no persona "${args.persona}" at ${rel(file)}. List them: mind agents list`);
 
@@ -269,11 +273,16 @@ const start = defineCommand({
     // agent queue. An explicit --task takes precedence.
     let task = args.task;
     let issueRef = null;
+    let issue = null;
     if (args.issue && !task) {
-      const i = loadIssue(root, args.issue, actorWebId);
-      issueRef = `MC-${i.number ?? "?"}`;
-      task = issueTask(i);
+      issue = loadIssue(root, args.issue, actorWebId);
+      issueRef = `MC-${issue.number ?? "?"}`;
+      task = issueTask(issue);
     }
+    // Claim the issue (→ in-progress) so it leaves the agent queue — otherwise
+    // `--issue next` keeps resurfacing the same issue every run. `--no-claim`
+    // keeps the old loose coupling (read the body, don't touch tracker state).
+    const willClaim = !!issue && !noClaim;
 
     const interactive = !task;
     const model = args.model || meta.model || undefined;
@@ -286,8 +295,8 @@ const start = defineCommand({
     });
 
     if (args["dry-run"]) {
-      emit({ backend: backendName, bin, args: argv, env, cwd: root, interactive, issue: issueRef, task }, () => {
-        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef : ""}`);
+      emit({ backend: backendName, bin, args: argv, env, cwd: root, interactive, issue: issueRef, claim: willClaim, task }, () => {
+        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef + (willClaim ? dim(" (would claim → in-progress)") : dim(" (no-claim)")) : ""}`);
         console.log(`${dim("$")} ${bin} ${argv.join(" ")}`);
         if (task) console.log(`\n${dim("task:")}\n${task}`);
       });
@@ -296,6 +305,30 @@ const start = defineCommand({
 
     if (!onPath(backend.bin))
       throw new Error(`backend "${backendName}" not found on PATH (${backend.bin}). Install: ${backend.install}`);
+
+    // Claim before launching: transitions the issue to in-progress so a re-run of
+    // `--issue next` advances to the next issue instead of re-picking this one. A
+    // crash mid-run leaves it in-progress until the claim's ttl lapses, then it
+    // returns to the queue (the ⏱ stale mark). Placed after the PATH check so a
+    // missing backend doesn't leave a spurious claim.
+    if (willClaim) {
+      const { cfg } = foldTracker(root);
+      const actor = resolveActor({ agent: true });
+      try {
+        assertClaimable(cfg, issue, actor, { force: !!args.force });
+      } catch (e) {
+        throw new Error(`cannot claim ${issueRef}: ${e.message}\n  re-run with --no-claim to launch without claiming.`);
+      }
+      const ttl = cfg.claimTtl || "PT2H";
+      appendEvent(
+        root,
+        issue,
+        { kind: "claim", to: "in-progress", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } },
+        actor,
+        "Claimed by agent on launch.",
+      );
+      process.stderr.write(`${sym.ok} claimed ${bold(issueRef)} ${dim(`→ in-progress (ttl ${ttl})`)}\n`);
+    }
 
     // Expose the active Solid identity to the child as context (the backend still
     // authenticates with its own creds — codex/claude login ≠ the mind identity).
