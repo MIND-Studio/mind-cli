@@ -16,6 +16,7 @@ mind grant <webid> <p> --modes r # share part of your pod (WAC)
 mind codespaces repos            # a plugin: drive the Solid Git bridge
 mind issues new "Fix it" --type bug   # a plugin: manage a local .mind tracker
 mind issues next --claim         #   …and the agent loop: grab the next ready issue
+mind agents start coder          # a plugin: launch a local CLI coding agent (codex) with a persona
 ```
 
 ## Why it exists
@@ -150,6 +151,26 @@ holds one session (re-login every 10 min, under the CSS token TTL), so an append
 line posts in ~150ms vs. `say`'s ~0.8s fresh-login round-trip — built for driving the room
 from a script or agent. `rm` is a *soft* delete (a marker triple) because shared rooms grant
 `acl:Append`, not `acl:Write` — hard removal needs room-owner (Write) access.
+
+**`agents`** — launch a *local* CLI coding agent (codex / claude / gemini) with a
+per-repo **persona** (a specialized system prompt) and the current repo as its
+working directory. First plugin to shell out — `node:child_process.spawn` with
+`stdio: "inherit"`, so the child owns the terminal (full TUI). Personas live in
+`<repo>/.mind/agents/<name>.md` (YAML frontmatter `name`/`description`/optional
+`backend`/`model` + a markdown body that **is** the system prompt):
+| | |
+|---|---|
+| `mind agents list` | personas in `.mind/agents/` + which backends are on PATH (`--json` for scripts) |
+| `mind agents start <persona>` | interactive: hand over the backend's TUI with the persona injected |
+| `mind agents start <persona> -p "<task>"` | headless: run the task, print the result, exit (child's exit code propagates) |
+
+Backends are **pluggable** (`--backend codex\|claude\|gemini`, or the persona's
+`backend:`; **codex** is the default). Persona injection differs per CLI: codex via
+`-c experimental_instructions_file=<file>`, claude via `--append-system-prompt`,
+gemini via `GEMINI_SYSTEM_MD`. A missing backend errors with an install hint and a
+non-zero exit. The agent authenticates with **its own** creds (codex/claude login is
+separate from the Mind identity); the active identity is exposed to the child only as
+`$MIND_WEBID`/`$MIND_AUTHOR`/`$MIND_POD_ROOT` context.
 
 **`issues`** — manage a local **`.mind/`** event-sourced issue tracker (the same
 markdown-folder + append-only `events/` format the codespaces bridge folds into
