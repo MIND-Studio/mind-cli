@@ -24,6 +24,8 @@ import {
 } from "node:fs";
 import { dirname, join, resolve, relative } from "node:path";
 import { getActive } from "../src/store.mjs";
+import { foldTracker } from "../src/tracker/fold.mjs";
+import { resolveIssue } from "../src/tracker/author.mjs";
 import { emit, table, guard, sym, green, red, cyan, yellow, dim, bold } from "../src/ui.mjs";
 
 const J = { json: { type: "boolean", description: "machine-readable JSON output" } };
@@ -149,6 +151,23 @@ export function onPath(bin) {
 
 const rel = (p) => relative(process.cwd(), p) || p;
 
+/** Build a task prompt from a folded tracker issue (title + body + a marching order). */
+export function issueTask(i) {
+  const handle = `MC-${i.number ?? "?"}`;
+  return [
+    `Work on tracker issue ${handle} (${i.category ?? "issue"}, state: ${i.state}): ${i.title}`,
+    i.body ? `\n\n${i.body}` : "",
+    `\n\nImplement this in the current repo. Keep the change small, tested, and idiomatic.`,
+    ` When done, summarize what changed. Do not close or hand off the issue yourself.`,
+  ].join("");
+}
+
+/** Resolve an issue ref (ULID / MC-N / #N / slug) against the repo's tracker fold. */
+function loadIssue(root, ref) {
+  const { epics } = foldTracker(root);
+  return resolveIssue(epics, ref); // throws a friendly error if unresolved
+}
+
 // ── list ──────────────────────────────────────────────────────────────────────
 
 const list = defineCommand({
@@ -191,8 +210,10 @@ const start = defineCommand({
   args: {
     persona: { type: "positional", required: true, description: "persona name (file in .mind/agents/)" },
     task: { type: "string", alias: "p", description: "run this task headless and exit (omit for interactive)" },
+    issue: { type: "string", alias: "i", description: "load a tracker issue (ULID/MC-N/slug) as the task" },
     backend: { type: "string", alias: "b", description: `codex|claude|gemini (default: persona's or ${DEFAULT_BACKEND})` },
     model: { type: "string", alias: "m", description: "model override" },
+    "dry-run": { type: "boolean", description: "print the resolved backend/argv/task and exit (no spawn)" },
   },
   run: guard(async ({ args }) => {
     const { agentsDir, root } = locateAgents();
@@ -205,18 +226,38 @@ const start = defineCommand({
     const backend = BACKENDS[backendName];
     if (!backend)
       throw new Error(`unknown backend "${backendName}" (have: ${Object.keys(BACKENDS).join(", ")})`);
-    if (!onPath(backend.bin))
-      throw new Error(`backend "${backendName}" not found on PATH (${backend.bin}). Install: ${backend.install}`);
 
-    const interactive = !args.task;
+    // --issue seeds the task from the repo's tracker fold (loosely coupled: we read
+    // the issue body, we don't claim/close it). An explicit --task takes precedence.
+    let task = args.task;
+    let issueRef = null;
+    if (args.issue && !task) {
+      const i = loadIssue(root, args.issue);
+      issueRef = `MC-${i.number ?? "?"}`;
+      task = issueTask(i);
+    }
+
+    const interactive = !task;
     const model = args.model || meta.model || undefined;
     const { bin, args: argv, env } = backend.build({
       personaFile: file,
       personaText: prompt,
-      task: args.task,
+      task,
       model,
       interactive,
     });
+
+    if (args["dry-run"]) {
+      emit({ backend: backendName, bin, args: argv, env, cwd: root, interactive, issue: issueRef, task }, () => {
+        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef : ""}`);
+        console.log(`${dim("$")} ${bin} ${argv.join(" ")}`);
+        if (task) console.log(`\n${dim("task:")}\n${task}`);
+      });
+      return;
+    }
+
+    if (!onPath(backend.bin))
+      throw new Error(`backend "${backendName}" not found on PATH (${backend.bin}). Install: ${backend.install}`);
 
     // Expose the active Solid identity to the child as context (the backend still
     // authenticates with its own creds — codex/claude login ≠ the mind identity).
@@ -231,7 +272,7 @@ const start = defineCommand({
     }
 
     process.stderr.write(
-      `${sym.arrow} ${cyan(backendName)} · ${bold(args.persona)} ${dim(interactive ? "(interactive)" : "(headless)")} ${dim("in " + (rel(root) || "."))}\n`,
+      `${sym.arrow} ${cyan(backendName)} · ${bold(args.persona)}${issueRef ? " · " + issueRef : ""} ${dim(interactive ? "(interactive)" : "(headless)")} ${dim("in " + (rel(root) || "."))}\n`,
     );
 
     await new Promise((res) => {
