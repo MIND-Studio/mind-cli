@@ -132,6 +132,25 @@ Paths are pod-relative, or absolute `http(s)://` URLs (for cross-pod access you'
 | `mind codespaces new <name> [--private]` | create a repo (returns clone URL) |
 | `mind codespaces token <repo> [--label L]` | mint a git push token |
 
+**`chat`** — post to and tail a Solid **long-chat** room as the active identity
+(same WebID you drive with `ls`/`put`/`grant`). Self-contained raw turtle over
+`session.fetch` — no SDK. Room defaults to `pod.mindpods.org/testuser/chat/general`
+(override with `--room <url>` or `$MIND_CHAT_ROOM`):
+| | |
+|---|---|
+| `mind chat whoami` | active identity + resolved room/day-file |
+| `mind chat say "<message>"` | post a message (appends to today's `chat.ttl` via SPARQL `INSERT DATA`) |
+| `mind chat read` | list today's messages (table; `--json` for raw) |
+| `mind chat watch` | live-tail the room (WebSocketChannel2023 push + poll fallback; rolls to the new day file at UTC midnight; Ctrl-C to stop) |
+| `mind chat connect [--outbox FILE]` | bidirectional agent loop: one held session streams inbound to stdout and posts each line appended to `--outbox` (default `~/.mind/chat-outbox`) — no per-message login |
+| `mind chat rm <message-url>` | soft-delete a message (appends a `schema:dateDeleted` marker; `read` then hides it) |
+
+`watch`/`connect` poll fallback is 5s; tighten with `MIND_CHAT_POLL_MS=1000`. `connect`
+holds one session (re-login every 10 min, under the CSS token TTL), so an appended outbox
+line posts in ~150ms vs. `say`'s ~0.8s fresh-login round-trip — built for driving the room
+from a script or agent. `rm` is a *soft* delete (a marker triple) because shared rooms grant
+`acl:Append`, not `acl:Write` — hard removal needs room-owner (Write) access.
+
 **`issues`** — manage a local **`.mind/`** event-sourced issue tracker (the same
 markdown-folder + append-only `events/` format the codespaces bridge folds into
 `build/*.ttl`). Operates on the `.mind/` of the repo you're in (walks up from cwd
@@ -174,7 +193,7 @@ export default {
 };
 ```
 
-Future ideas: `mind drive`, `mind chat`, `mind social`, `mind builder` — each
+Future ideas: `mind drive`, `mind social`, `mind builder` — each
 prototype exposing its verbs. Keep plugins thin; real logic stays in the
 prototype/bridge.
 
