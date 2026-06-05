@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { parsePersona, readPersonas, BACKENDS, issueTask } from "../plugins/agents.mjs";
+import { parsePersona, readPersonas, BACKENDS, issueTask, isFalsey } from "../plugins/agents.mjs";
 
 test("parsePersona: frontmatter → meta, body → prompt", () => {
   const { meta, prompt } = parsePersona(
@@ -33,11 +33,18 @@ test("readPersonas: carries model frontmatter through", () => {
     `---\ndescription: "writes code"\nbackend: codex\nmodel: gpt-5.5\n---\nYou are coder.`,
   );
   writeFileSync(join(agentsDir, "reviewer.md"), `---\ndescription: "reviews code"\n---\nYou are reviewer.`);
+  writeFileSync(join(agentsDir, "guide.md"), `---\ndescription: "explains"\nclaim: false\n---\nYou are guide.`);
 
   assert.deepEqual(readPersonas(agentsDir), [
-    { name: "coder", description: "writes code", backend: "codex", model: "gpt-5.5" },
-    { name: "reviewer", description: "reviews code", backend: null, model: null },
+    { name: "coder", description: "writes code", backend: "codex", model: "gpt-5.5", claim: true },
+    { name: "guide", description: "explains", backend: null, model: null, claim: false },
+    { name: "reviewer", description: "reviews code", backend: null, model: null, claim: true },
   ]);
+});
+
+test("isFalsey: only false/no/0/off (case-insensitive) are falsey; absent → truthy", () => {
+  for (const v of [false, "false", "FALSE", "no", "0", "off", " Off "]) assert.equal(isFalsey(v), true, String(v));
+  for (const v of [undefined, null, "", "true", "yes", "1", "claim"]) assert.equal(isFalsey(v), false, String(v));
 });
 
 test("codex backend: persona is prepended to the prompt (no system-prompt flag)", () => {
@@ -108,4 +115,107 @@ test("agents start --no-persona dry-run launches bare codex and does not read a 
   const out = r.stdout + r.stderr;
   assert.match(out, /\$ codex exec echo hi/);
   assert.doesNotMatch(out, /SYSTEM PERSONA|--append-system-prompt|GEMINI_SYSTEM_MD/);
+});
+
+test("agents start --issue claims the issue (→ in-progress) so the queue advances", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-claim-"));
+  // A fake `codex` on PATH so the launch is harmless (no model call): the claim
+  // happens before spawn, so all we need is an executable that exits 0.
+  const fakeBin = join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1", PATH: `${fakeBin}:${process.env.PATH}` };
+  const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+
+  // Scaffold a tracker, file an issue, hand it to agents.
+  assert.equal(run("issues", "init").status, 0);
+  const made = run("issues", "new", "fix the thing", "--type", "bug", "--json");
+  assert.equal(made.status, 0, made.stderr);
+  const handle = `MC-${JSON.parse(made.stdout).number}`; // e.g. MC-1
+  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
+
+  // A persona to launch with.
+  mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".mind", "agents", "coder.md"), "---\nbackend: codex\n---\nYou are coder.");
+
+  // Before: the issue is the head of the agent queue.
+  assert.match(run("issues", "next").stdout, new RegExp(handle));
+
+  // Launch the agent against it → should claim (→ in-progress), then run the fake codex.
+  const started = run("agents", "start", "coder", "--issue", "next");
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  assert.match(started.stderr + started.stdout, new RegExp(`claimed ${handle}`));
+
+  // After: the issue left the agent queue, and its state is in-progress.
+  const after = run("issues", "next");
+  assert.doesNotMatch(after.stdout, new RegExp(handle), "claimed issue must leave the agent queue");
+  const shown = JSON.parse(run("issues", "show", handle, "--json").stdout);
+  assert.equal(shown.issue.state, "in-progress");
+});
+
+test("agents start --issue --no-claim leaves the issue in the queue", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-noclaim-"));
+  const fakeBin = join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1", PATH: `${fakeBin}:${process.env.PATH}` };
+  const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+
+  assert.equal(run("issues", "init").status, 0);
+  const handle = `MC-${JSON.parse(run("issues", "new", "x", "--type", "bug", "--json").stdout).number}`;
+  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
+  mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".mind", "agents", "coder.md"), "---\nbackend: codex\n---\nYou are coder.");
+
+  const started = run("agents", "start", "coder", "--issue", "next", "--no-claim");
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  // Still claimable: no claim was written, state stays ready-for-agent.
+  assert.match(run("issues", "next").stdout, new RegExp(handle));
+  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "ready-for-agent");
+});
+
+test("agents start: a `claim: false` persona inspects an issue without claiming it", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-readonly-"));
+  const fakeBin = join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1", PATH: `${fakeBin}:${process.env.PATH}` };
+  const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+
+  assert.equal(run("issues", "init").status, 0);
+  const handle = `MC-${JSON.parse(run("issues", "new", "y", "--type", "bug", "--json").stdout).number}`;
+  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
+  mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".mind", "agents", "guide.md"), "---\nbackend: codex\nclaim: false\n---\nYou are guide (read-only).");
+
+  const started = run("agents", "start", "guide", "--issue", "next");
+  assert.equal(started.status, 0, started.stderr || started.stdout);
+  assert.doesNotMatch(started.stderr + started.stdout, /claimed/, "a read-only persona must not claim");
+  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "ready-for-agent");
+});
+
+test("agents list --json flags personas whose backend isn't installed", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-list-"));
+  const fakeBin = join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(join(fakeBin, "codex"), "#!/bin/sh\nexit 0\n", { mode: 0o755 }); // only codex on PATH
+  mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
+  writeFileSync(join(cwd, ".mind", "agents", "coder.md"), "---\nbackend: codex\n---\nc");
+  writeFileSync(join(cwd, ".mind", "agents", "tester.md"), "---\nbackend: gemini\n---\nt"); // not installed
+  writeFileSync(join(cwd, ".mind", "agents", "weird.md"), "---\nbackend: bogus\n---\nw"); // unknown backend
+  const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1", PATH: `${fakeBin}` };
+
+  const r = spawnSync(process.execPath, [bin, "agents", "list", "--json"], { cwd, env, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const personas = Object.fromEntries(JSON.parse(r.stdout).personas.map((p) => [p.name, p]));
+  assert.deepEqual(
+    [personas.coder.backendInstalled, personas.tester.backendInstalled, personas.weird.backendInstalled],
+    [true, false, false],
+  );
+  assert.equal(personas.weird.backendKnown, false);
+  assert.equal(personas.coder.backend, "codex");
 });

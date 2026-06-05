@@ -22,10 +22,11 @@ import {
   accessSync,
   constants as FS,
 } from "node:fs";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, join, resolve, relative, delimiter } from "node:path";
 import { getActive } from "../src/store.mjs";
 import { foldTracker } from "../src/tracker/fold.mjs";
-import { resolveIssue } from "../src/tracker/author.mjs";
+import { resolveIssue, appendEvent, assertClaimable, addDuration } from "../src/tracker/author.mjs";
+import { resolveActor } from "../src/tracker/actor.mjs";
 import { agentQueue } from "../src/tracker/queue.mjs";
 import { emit, table, guard, sym, green, red, cyan, yellow, dim, bold } from "../src/ui.mjs";
 
@@ -43,6 +44,11 @@ export function parsePersona(text) {
     if (kv) meta[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
   }
   return { meta, prompt: m[2].trim() };
+}
+
+/** Frontmatter values are parsed as strings — treat `false`/`no`/`0`/`off` as false. */
+export function isFalsey(v) {
+  return v === false || /^(false|no|0|off)$/i.test(String(v ?? "").trim());
 }
 
 /** Walk up from `start` for a directory containing `.mind/`. Returns its path or null. */
@@ -76,16 +82,25 @@ export function readPersonas(agentsDir) {
     .map((f) => {
       const { meta } = parsePersona(readFileSync(join(agentsDir, f), "utf8"));
       const name = f.replace(/\.md$/, "");
-      return { name, description: meta.description ?? "", backend: meta.backend ?? null, model: meta.model ?? null };
+      return {
+        name,
+        description: meta.description ?? "",
+        backend: meta.backend ?? null,
+        model: meta.model ?? null,
+        // read-only personas (e.g. `guide`) set `claim: false` so launching them
+        // against an issue inspects it without claiming it.
+        claim: isFalsey(meta.claim) ? false : true,
+      };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ── backends (pluggable) ──────────────────────────────────────────────────────
 // Each backend maps the common shape to its own argv/env. codex is the default.
-// Persona injection differs per CLI: codex has no system-prompt flag (we point it
-// at the persona file via a config override); claude takes the prompt as a string;
-// gemini reads it from an env var.
+// Persona injection differs per CLI: codex has no system-prompt flag, so we
+// prepend the persona to the prompt (its `-c experimental_instructions_file` is
+// silently ignored); claude takes the prompt as a string (--append-system-prompt);
+// gemini reads it from the GEMINI_SYSTEM_MD env var.
 
 /** codex has no system-prompt channel — fold the persona into the prompt itself. */
 export function composeCodexPrompt(personaText, task, interactive) {
@@ -150,7 +165,7 @@ const DEFAULT_BACKEND = "codex";
 
 /** First executable named `bin` on PATH, or null. */
 export function onPath(bin) {
-  for (const d of (process.env.PATH || "").split(":")) {
+  for (const d of (process.env.PATH || "").split(delimiter)) {
     if (!d) continue;
     const p = join(d, bin);
     try {
@@ -180,7 +195,8 @@ export function issueTask(i) {
  * Resolve an issue ref against the repo's tracker fold. The literal `next` picks
  * the top of the agent queue (same ranking as `mind issues next`); anything else
  * is a ULID / MC-N / #N / slug. `actorWebId` lets a claim the agent already holds
- * count as claimable. Read-only — picking `next` here does not claim the issue.
+ * count as claimable. Returns the folded `cfg` too so the caller can claim without
+ * re-folding the whole tracker. Read-only — picking `next` does not claim here.
  */
 function loadIssue(root, ref, actorWebId = null) {
   const { cfg, epics } = foldTracker(root);
@@ -188,9 +204,9 @@ function loadIssue(root, ref, actorWebId = null) {
     const queue = agentQueue({ cfg, epics, actorWebId });
     if (!queue.length)
       throw new Error("no claimable agent work — queue is empty (see `mind issues next --all`).");
-    return queue[0];
+    return { issue: queue[0], cfg };
   }
-  return resolveIssue(epics, ref); // throws a friendly error if unresolved
+  return { issue: resolveIssue(epics, ref), cfg }; // throws a friendly error if unresolved
 }
 
 // ── list ──────────────────────────────────────────────────────────────────────
@@ -207,15 +223,23 @@ const list = defineCommand({
       installed: !!onPath(b.bin),
       default: name === DEFAULT_BACKEND,
     }));
-    emit({ agentsDir: loc?.agentsDir ?? null, personas, backends }, () => {
-      if (!personas.length) {
+    const installedOf = new Map(backends.map((b) => [b.name, b.installed]));
+    // Resolve each persona's effective backend and whether it's runnable here, so
+    // the table can warn when a persona points at a missing/unknown backend.
+    const rows = personas.map((p) => {
+      const backend = p.backend ?? DEFAULT_BACKEND;
+      const known = Object.prototype.hasOwnProperty.call(BACKENDS, backend);
+      return { ...p, backend, backendInstalled: known && installedOf.get(backend) === true, backendKnown: known };
+    });
+    emit({ agentsDir: loc?.agentsDir ?? null, personas: rows, backends }, () => {
+      if (!rows.length) {
         console.log(dim(loc ? `no personas in ${rel(loc.agentsDir)}/ — create <name>.md (frontmatter + system prompt)` : "no .mind/ here — nothing to launch"));
       } else {
         table(
           ["persona", "backend", "model", "description"],
-          personas.map((p) => [
+          rows.map((p) => [
             cyan(p.name),
-            dim(p.backend ?? DEFAULT_BACKEND),
+            !p.backendKnown ? yellow(`${p.backend} (unknown)`) : p.backendInstalled ? dim(p.backend) : red(`${p.backend} (not installed)`),
             p.model || dim("—"),
             p.description || dim("—"),
           ]),
@@ -240,12 +264,15 @@ const start = defineCommand({
     backend: { type: "string", alias: "b", description: `codex|claude|gemini (default: persona's or ${DEFAULT_BACKEND})` },
     model: { type: "string", alias: "m", description: "model override" },
     "no-persona": { type: "boolean", description: "launch the backend bare without injecting or reading the persona prompt" },
+    "no-claim": { type: "boolean", description: "with --issue: don't claim the issue (leaves it in the agent queue)" },
+    force: { type: "boolean", description: "with --issue: steal a live claim held by someone else" },
     "dry-run": { type: "boolean", description: "print the resolved backend/argv/task and exit (no spawn)" },
   },
   run: guard(async ({ args, rawArgs }) => {
     const { agentsDir, root } = locateAgents();
     const file = join(agentsDir, `${args.persona}.md`);
     const noPersona = !!args["no-persona"] || rawArgs.includes("--no-persona");
+    const noClaim = !!args["no-claim"] || rawArgs.includes("--no-claim");
     if (!noPersona && !existsSync(file))
       throw new Error(`no persona "${args.persona}" at ${rel(file)}. List them: mind agents list`);
 
@@ -269,11 +296,18 @@ const start = defineCommand({
     // agent queue. An explicit --task takes precedence.
     let task = args.task;
     let issueRef = null;
+    let issue = null;
+    let trackerCfg = null;
     if (args.issue && !task) {
-      const i = loadIssue(root, args.issue, actorWebId);
-      issueRef = `MC-${i.number ?? "?"}`;
-      task = issueTask(i);
+      ({ issue, cfg: trackerCfg } = loadIssue(root, args.issue, actorWebId));
+      issueRef = `MC-${issue.number ?? "?"}`;
+      task = issueTask(issue);
     }
+    // Claim the issue (→ in-progress) so it leaves the agent queue — otherwise
+    // `--issue next` keeps resurfacing the same issue every run. `--no-claim`
+    // keeps the old loose coupling (read the body, don't touch tracker state);
+    // a persona with `claim: false` (read-only personas like `guide`) opts out too.
+    const willClaim = !!issue && !noClaim && !isFalsey(meta.claim);
 
     const interactive = !task;
     const model = args.model || meta.model || undefined;
@@ -286,8 +320,8 @@ const start = defineCommand({
     });
 
     if (args["dry-run"]) {
-      emit({ backend: backendName, bin, args: argv, env, cwd: root, interactive, issue: issueRef, task }, () => {
-        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef : ""}`);
+      emit({ backend: backendName, bin, args: argv, env, cwd: root, interactive, issue: issueRef, claim: willClaim, task }, () => {
+        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef + (willClaim ? dim(" (would claim → in-progress)") : dim(" (no-claim)")) : ""}`);
         console.log(`${dim("$")} ${bin} ${argv.join(" ")}`);
         if (task) console.log(`\n${dim("task:")}\n${task}`);
       });
@@ -296,6 +330,29 @@ const start = defineCommand({
 
     if (!onPath(backend.bin))
       throw new Error(`backend "${backendName}" not found on PATH (${backend.bin}). Install: ${backend.install}`);
+
+    // Claim before launching: transitions the issue to in-progress so a re-run of
+    // `--issue next` advances to the next issue instead of re-picking this one. A
+    // crash mid-run leaves it in-progress until the claim's ttl lapses, then it
+    // returns to the queue (the ⏱ stale mark). Placed after the PATH check so a
+    // missing backend doesn't leave a spurious claim.
+    if (willClaim) {
+      const actor = resolveActor({ agent: true });
+      try {
+        assertClaimable(trackerCfg, issue, actor, { force: !!args.force });
+      } catch (e) {
+        throw new Error(`cannot claim ${issueRef}: ${e.message}\n  re-run with --no-claim to launch without claiming.`);
+      }
+      const ttl = trackerCfg.claimTtl || "PT2H";
+      appendEvent(
+        root,
+        issue,
+        { kind: "claim", to: "in-progress", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } },
+        actor,
+        "Claimed by agent on launch.",
+      );
+      process.stderr.write(`${sym.ok} claimed ${bold(issueRef)} ${dim(`→ in-progress (ttl ${ttl})`)}\n`);
+    }
 
     // Expose the active Solid identity to the child as context (the backend still
     // authenticates with its own creds — codex/claude login ≠ the mind identity).
