@@ -166,9 +166,9 @@ working directory. First plugin to shell out — `node:child_process.spawn` with
 | `mind agents start <persona> --issue MC-N` | **load a tracker issue** (ULID/`MC-N`/slug) as the task — folds its title+body into the prompt (loosely coupled: reads the issue, never claims/closes it). `--dry-run` prints the resolved backend/argv/task without spawning |
 
 Backends are **pluggable** (`--backend codex\|claude\|gemini`, or the persona's
-`backend:`; **codex** is the default). Persona injection differs per CLI: codex via
-`-c experimental_instructions_file=<file>`, claude via `--append-system-prompt`,
-gemini via `GEMINI_SYSTEM_MD`. A missing backend errors with an install hint and a
+`backend:`; **codex** is the default). Persona injection differs per CLI: codex
+**prepends the persona to the prompt** (it has no system-prompt channel), claude via
+`--append-system-prompt`, gemini via `GEMINI_SYSTEM_MD`. A missing backend errors with an install hint and a
 non-zero exit. The agent authenticates with **its own** creds (codex/claude login is
 separate from the Mind identity); the active identity is exposed to the child only as
 `$MIND_WEBID`/`$MIND_AUTHOR`/`$MIND_POD_ROOT` context.

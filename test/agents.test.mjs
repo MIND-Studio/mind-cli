@@ -20,22 +20,18 @@ test("parsePersona: no frontmatter → whole text is the prompt", () => {
   assert.equal(prompt, "just a system prompt");
 });
 
-test("codex backend: persona via -c, headless adds exec, model + task ordered", () => {
-  const interactive = BACKENDS.codex.build({ personaFile: "/p/coder.md", interactive: true });
-  assert.deepEqual(interactive, {
-    bin: "codex",
-    env: {},
-    args: ["-c", "experimental_instructions_file=/p/coder.md"],
-  });
-  const headless = BACKENDS.codex.build({ personaFile: "/p/coder.md", task: "fix bug", model: "o3", interactive: false });
-  assert.deepEqual(headless.args, [
-    "exec",
-    "-c",
-    "experimental_instructions_file=/p/coder.md",
-    "-m",
-    "o3",
-    "fix bug",
-  ]);
+test("codex backend: persona is prepended to the prompt (no system-prompt flag)", () => {
+  // Interactive, no task → persona block + an ack line so the session starts in-persona.
+  const interactive = BACKENDS.codex.build({ personaText: "be coder", interactive: true });
+  assert.equal(interactive.bin, "codex");
+  assert.deepEqual(interactive.env, {});
+  assert.equal(interactive.args.length, 1); // just the composed prompt, no `exec`
+  assert.match(interactive.args[0], /SYSTEM PERSONA[\s\S]*be coder[\s\S]*Acknowledge your role/);
+
+  // Headless → `exec`, model flag, then the persona+task prompt as the final arg.
+  const headless = BACKENDS.codex.build({ personaText: "be coder", task: "fix bug", model: "o3", interactive: false });
+  assert.deepEqual(headless.args.slice(0, 3), ["exec", "-m", "o3"]);
+  assert.match(headless.args[3], /SYSTEM PERSONA[\s\S]*be coder[\s\S]*---[\s\S]*fix bug/);
 });
 
 test("claude backend: persona as string, headless uses -p", () => {
