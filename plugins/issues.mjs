@@ -52,24 +52,30 @@ function requireState(cfg, to, { closedOnly = false } = {}) {
   return s;
 }
 
-function paintState(cfg, id) {
+// Color function for a state id (so callers can pad raw text, then color it).
+function stateColor(cfg, id) {
   const s = cfg.states.find((x) => x.id === id);
-  if (!s) return yellow(id);
-  if (!s.open) return id === "wontfix" ? gray(id) : dim(id);
-  if (id === "needs-triage" || id === "blocked") return yellow(id);
-  if (id === "in-progress") return cyan(id);
-  return green(id);
+  if (!s) return yellow;
+  if (!s.open) return id === "wontfix" ? gray : dim;
+  if (id === "needs-triage" || id === "blocked") return yellow;
+  if (id === "in-progress") return cyan;
+  return green;
 }
+function paintState(cfg, id) {
+  return stateColor(cfg, id)(id);
+}
+
+// Priority gutter: one glyph so a busy/urgent issue stands out without a column.
+const priMark = (p) =>
+  p === "urgent" ? red("‼") : p === "high" ? yellow("↑") : p === "low" ? dim("↓") : " ";
 
 const handle = (i) => `MC-${i.number ?? "?"}`;
 const staleMark = (i) => (i.expiresAt && new Date(i.expiresAt).getTime() <= Date.now() ? " ⏱" : "");
 
 // ── list ──────────────────────────────────────────────────────────────────────
-function runList(args) {
-  const { cfg, epics } = load(args);
-  const actor = resolveActor(args);
-
-  const match = (i) => {
+// Shared issue filter for list/board — honors --state/--type/--priority/--label/--mine/--open/--closed.
+function makeMatch(cfg, args, actor) {
+  return (i) => {
     const st = cfg.states.find((s) => s.id === i.state);
     if (args.state && i.state !== args.state) return false;
     if (args.type && i.category !== args.type) return false;
@@ -80,6 +86,14 @@ function runList(args) {
     if (args.closed && st && st.open) return false;
     return true;
   };
+}
+
+const PRI_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };
+
+function runList(args) {
+  const { cfg, epics } = load(args);
+  const actor = resolveActor(args);
+  const match = makeMatch(cfg, args, actor);
 
   const groups = epics
     .map((e) => ({ epic: e, issues: e.issues.filter(match) }))
@@ -112,22 +126,33 @@ function runList(args) {
     },
     () => {
       if (!groups.length) return console.log(dim('no issues yet — `mind issues new "<title>"`'));
+
+      // One aligned line per issue, no box drawing. Widths are global across all
+      // groups so columns line up the whole way down. A leading glyph flags
+      // priority; trailing dim text carries holder + labels (only when present).
+      const all = groups.flatMap((g) => g.issues);
+      const wId = Math.max(...all.map((i) => handle(i).length));
+      const wState = Math.max(...all.map((i) => i.state.length));
+      const wType = Math.max(...all.map((i) => (i.category ?? "").length));
+      const total = all.length;
+
       for (const g of groups) {
-        const label = g.epic.isGeneral ? "General (un-epic'd)" : g.epic.title;
-        console.log(`\n${bold(label)} ${dim(`[${g.epic.status}, ${g.issues.length} issue${g.issues.length === 1 ? "" : "s"}]`)}`);
-        table(
-          ["#", "state", "pri", "type", "title", "holder", "labels"],
-          g.issues.map((i) => [
-            cyan(handle(i)),
-            paintState(cfg, i.state),
-            i.priority ?? dim("—"),
-            i.category,
-            i.title.length > 48 ? i.title.slice(0, 47) + "…" : i.title,
-            i.assignee ? dim(lastSeg(i.assignee) + staleMark(i)) : dim("—"),
-            i.labels.length ? dim(i.labels.join(",")) : "",
-          ]),
-        );
+        const label = g.epic.isGeneral ? "General" : g.epic.title;
+        console.log(`\n${bold(label)} ${dim(`· ${g.issues.length}`)}`);
+        for (const i of g.issues) {
+          const meta = [
+            i.assignee ? dim(lastSeg(i.assignee) + staleMark(i)) : "",
+            i.labels.length ? dim(i.labels.join(" ")) : "",
+          ].filter(Boolean).join("  ");
+          console.log(
+            `  ${priMark(i.priority)} ${cyan(handle(i).padEnd(wId))}  ` +
+              `${stateColor(cfg, i.state)(i.state.padEnd(wState))}  ` +
+              `${dim((i.category ?? "").padEnd(wType))}  ` +
+              `${i.title}${meta ? "   " + meta : ""}`,
+          );
+        }
       }
+      console.log(dim(`\n${total} issue${total === 1 ? "" : "s"}`));
     },
   );
 }
@@ -150,6 +175,82 @@ const list = defineCommand({
     ...J,
   },
   run: guard(async ({ args }) => runList(args)),
+});
+
+// ── board ─────────────────────────────────────────────────────────────────────
+// Same fold + filters as `list`, but grouped by STATE (kanban lanes) instead of
+// by epic. Lanes follow tracker.config state order (the workflow left→right);
+// each issue carries its epic as a dim trailing tag so context isn't lost.
+function runBoard(args) {
+  const { cfg, epics } = load(args);
+  const actor = resolveActor(args);
+  const match = makeMatch(cfg, args, actor);
+
+  const all = epics.flatMap((e) =>
+    e.issues.filter(match).map((i) => ({ ...i, epicLabel: e.isGeneral ? null : e.title })),
+  );
+  // One lane per state that has issues, in config (workflow) order.
+  const lanes = cfg.states
+    .map((s) => ({
+      state: s,
+      issues: all
+        .filter((i) => i.state === s.id)
+        .sort((a, b) => (PRI_RANK[a.priority] ?? 2) - (PRI_RANK[b.priority] ?? 2) || (a.number ?? 0) - (b.number ?? 0)),
+    }))
+    .filter((l) => l.issues.length);
+
+  emit(
+    {
+      board: lanes.map((l) => ({
+        state: l.state.id,
+        open: !!l.state.open,
+        count: l.issues.length,
+        issues: l.issues.map((i) => ({
+          id: i.id, number: i.number, slug: i.slug, title: i.title,
+          type: i.category, priority: i.priority, holder: i.assignee,
+          epic: i.epicLabel, labels: i.labels,
+        })),
+      })),
+    },
+    () => {
+      if (!lanes.length) return console.log(dim('no issues yet — `mind issues new "<title>"`'));
+      const wId = Math.max(...all.map((i) => handle(i).length));
+      const total = all.length;
+      for (const l of lanes) {
+        const color = stateColor(cfg, l.state.id);
+        console.log(`\n${color(bold(l.state.label ?? l.state.id))} ${dim(`· ${l.issues.length}`)}`);
+        for (const i of l.issues) {
+          const meta = [
+            i.epicLabel ? dim(i.epicLabel) : "",
+            i.assignee ? dim(lastSeg(i.assignee) + staleMark(i)) : "",
+            i.labels.length ? dim(i.labels.join(" ")) : "",
+          ].filter(Boolean).join("  ");
+          console.log(
+            `  ${priMark(i.priority)} ${cyan(handle(i).padEnd(wId))}  ${i.title}${meta ? "   " + meta : ""}`,
+          );
+        }
+      }
+      console.log(dim(`\n${total} issue${total === 1 ? "" : "s"}`));
+    },
+  );
+}
+
+const board = defineCommand({
+  meta: { name: "board", description: "kanban view: issues grouped by state lane (same filters as list)" },
+  args: {
+    state: { type: "string", description: "filter by state id" },
+    type: { type: "string", description: "filter by category" },
+    priority: { type: "string", description: "filter by priority" },
+    epic: { type: "string", description: "filter by epic slug" },
+    label: { type: "string", description: "filter by label" },
+    mine: { type: "boolean", description: "only issues you hold" },
+    open: { type: "boolean", description: "only open states" },
+    closed: { type: "boolean", description: "only closed states" },
+    ...ACTOR,
+    ...DIR,
+    ...J,
+  },
+  run: guard(async ({ args }) => runBoard(args)),
 });
 
 // ── next (agent work-queue picker) ──────────────────────────────────────────────
@@ -547,7 +648,7 @@ export default defineCommand({
     new: create,
     create,
     list,
-    board: list,
+    board,
     next,
     show,
     triage,
