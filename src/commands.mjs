@@ -28,6 +28,18 @@ export function slugifyHandle(handle) {
   return slug || "identity";
 }
 
+// True for a localhost/loopback/.local issuer. Used to tailor failure guidance:
+// a non-local issuer (e.g. the production pod) may have signup gated, so a failed
+// `id create` should point at import / local-first rather than a raw error.
+export function isLocalIssuer(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".local");
+  } catch {
+    return false;
+  }
+}
+
 async function readStdin() {
   const chunks = [];
   for await (const c of process.stdin) chunks.push(c);
@@ -75,6 +87,17 @@ const idCreate = defineCommand({
       s.succeed(`created ${creds.webId}`);
     } catch (e) {
       s.fail("create failed");
+      // `id create` assumes the issuer allows open registration. The production
+      // pod may gate signup — turn a raw failure into a path forward: adopt an
+      // existing creds file, or provision against a local CSS first.
+      if (!isLocalIssuer(issuer)) {
+        throw new Error(
+          `${e.message}\n` +
+            `${issuer} may have signup gated. Either:\n` +
+            `  • adopt existing creds:  mind id import <creds.json> --name ${name}\n` +
+            `  • provision locally first: mind id create ${args.handle} --issuer http://localhost:3011/`,
+        );
+      }
       throw e;
     }
     creds.label = args.name || `${args.handle} @ ${new URL(issuer).host}`;

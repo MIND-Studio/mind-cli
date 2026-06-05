@@ -6,10 +6,34 @@
 
 import { defineCommand } from "citty";
 import { getActive } from "../src/store.mjs";
-import { emit, table, spin, guard, sym, green, dim, cyan } from "../src/ui.mjs";
+import { emit, table, spin, guard, sym, green, dim, cyan, yellow } from "../src/ui.mjs";
 
 const BRIDGE = process.env.BRIDGE_URL || "http://localhost:3010";
 const J = { json: { type: "boolean", description: "machine-readable JSON output" } };
+
+// The bridge only honours the dev-auth header (X-Mind-Dev-WebId) outside
+// production, so codespaces authenticates only against a *local* bridge. A
+// non-local BRIDGE_URL (e.g. codespaces.mindpods.org) will reject these calls
+// until real OIDC is wired — warn once (to stderr, so --json stdout stays clean)
+// rather than letting it fail with a cryptic 401/403.
+export function isLocalBridge(url) {
+  try {
+    const h = new URL(url).hostname.replace(/^\[|\]$/g, "");
+    return h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".local");
+  } catch {
+    return false;
+  }
+}
+let warnedRemote = false;
+function warnIfRemoteBridge() {
+  if (warnedRemote || isLocalBridge(BRIDGE)) return;
+  warnedRemote = true;
+  process.stderr.write(
+    `${sym.warn} ${yellow("codespaces uses dev-auth")} (X-Mind-Dev-WebId), which a production bridge does not honour.\n` +
+      `  ${dim(BRIDGE)} will likely reject these calls until real OIDC is wired.\n` +
+      `  This command currently works only against a local bridge ${dim("(BRIDGE_URL=http://localhost:3010)")}.\n`,
+  );
+}
 
 function ownerOf(id) {
   const m = id.webId.match(/^https?:\/\/[^/]+\/([^/]+)\//);
@@ -18,6 +42,7 @@ function ownerOf(id) {
 }
 
 async function api(path, id, init = {}) {
+  warnIfRemoteBridge();
   const res = await fetch(`${BRIDGE}${path}`, {
     ...init,
     headers: {

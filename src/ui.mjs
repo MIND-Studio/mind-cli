@@ -28,6 +28,7 @@ export const sym = {
   err: COLOR ? pc.red("✖") : "x",
   active: COLOR ? pc.green("●") : "*",
   arrow: COLOR ? pc.cyan("›") : ">",
+  warn: COLOR ? pc.yellow("!") : "!",
 };
 
 // Print structured JSON in --json mode, otherwise run the human printer.
