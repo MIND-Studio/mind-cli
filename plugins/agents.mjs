@@ -238,15 +238,17 @@ const start = defineCommand({
     issue: { type: "string", alias: "i", description: "load a tracker issue as the task (ULID/MC-N/slug, or `next` for the top of the agent queue)" },
     backend: { type: "string", alias: "b", description: `codex|claude|gemini (default: persona's or ${DEFAULT_BACKEND})` },
     model: { type: "string", alias: "m", description: "model override" },
+    "no-persona": { type: "boolean", description: "launch the backend bare without injecting or reading the persona prompt" },
     "dry-run": { type: "boolean", description: "print the resolved backend/argv/task and exit (no spawn)" },
   },
-  run: guard(async ({ args }) => {
+  run: guard(async ({ args, rawArgs }) => {
     const { agentsDir, root } = locateAgents();
     const file = join(agentsDir, `${args.persona}.md`);
-    if (!existsSync(file))
+    const noPersona = !!args["no-persona"] || rawArgs.includes("--no-persona");
+    if (!noPersona && !existsSync(file))
       throw new Error(`no persona "${args.persona}" at ${rel(file)}. List them: mind agents list`);
 
-    const { meta, prompt } = parsePersona(readFileSync(file, "utf8"));
+    const { meta, prompt } = noPersona ? { meta: {}, prompt: undefined } : parsePersona(readFileSync(file, "utf8"));
     const backendName = args.backend || meta.backend || DEFAULT_BACKEND;
     const backend = BACKENDS[backendName];
     if (!backend)
@@ -275,8 +277,8 @@ const start = defineCommand({
     const interactive = !task;
     const model = args.model || meta.model || undefined;
     const { bin, args: argv, env } = backend.build({
-      personaFile: file,
-      personaText: prompt,
+      personaFile: noPersona ? undefined : file,
+      personaText: noPersona ? undefined : prompt,
       task,
       model,
       interactive,

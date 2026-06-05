@@ -4,6 +4,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { parsePersona, BACKENDS, issueTask } from "../plugins/agents.mjs";
 
 test("parsePersona: frontmatter → meta, body → prompt", () => {
@@ -34,11 +38,21 @@ test("codex backend: persona is prepended to the prompt (no system-prompt flag)"
   assert.match(headless.args[3], /SYSTEM PERSONA[\s\S]*be coder[\s\S]*---[\s\S]*fix bug/);
 });
 
+test("codex backend: no persona emits only the task prompt", () => {
+  const headless = BACKENDS.codex.build({ personaText: undefined, task: "echo hi", interactive: false });
+  assert.deepEqual(headless.args, ["exec", "echo hi"]);
+});
+
 test("claude backend: persona as string, headless uses -p", () => {
   const interactive = BACKENDS.claude.build({ personaText: "be coder", interactive: true });
   assert.deepEqual(interactive.args, ["--append-system-prompt", "be coder", "--add-dir", "."]);
   const headless = BACKENDS.claude.build({ personaText: "be coder", task: "ship it", interactive: false });
   assert.deepEqual(headless.args, ["--append-system-prompt", "be coder", "--add-dir", ".", "-p", "ship it"]);
+});
+
+test("claude backend: no persona omits append-system-prompt", () => {
+  const headless = BACKENDS.claude.build({ personaText: undefined, task: "ship it", interactive: false });
+  assert.deepEqual(headless.args, ["--add-dir", ".", "-p", "ship it"]);
 });
 
 test("issueTask: folds handle, title, body and a marching order into a prompt", () => {
@@ -54,4 +68,28 @@ test("gemini backend: persona via env var", () => {
   const r = BACKENDS.gemini.build({ personaFile: "/p/coder.md", task: "go", interactive: false });
   assert.deepEqual(r.env, { GEMINI_SYSTEM_MD: "/p/coder.md" });
   assert.deepEqual(r.args, ["-p", "go"]);
+
+  const bare = BACKENDS.gemini.build({ personaFile: undefined, task: "go", interactive: false });
+  assert.deepEqual(bare.env, {});
+  assert.deepEqual(bare.args, ["-p", "go"]);
+});
+
+test("agents start --no-persona dry-run launches bare codex and does not read a persona file", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "mind-agents-"));
+  mkdirSync(join(cwd, ".mind"), { recursive: true });
+
+  const r = spawnSync(
+    process.execPath,
+    [new URL("../bin/mind.mjs", import.meta.url).pathname, "agents", "start", "coder", "--no-persona", "-p", "echo hi", "--dry-run"],
+    {
+      cwd,
+      env: { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1" },
+      encoding: "utf8",
+    },
+  );
+
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  const out = r.stdout + r.stderr;
+  assert.match(out, /\$ codex exec echo hi/);
+  assert.doesNotMatch(out, /SYSTEM PERSONA|--append-system-prompt|GEMINI_SYSTEM_MD/);
 });
