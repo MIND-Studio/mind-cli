@@ -77,6 +77,8 @@ redacts `clientSecret`/`password`.
 - **Help everywhere** (citty-generated): `mind --help`, `mind <group> --help`,
   `mind <group> <cmd> --help` — typed args and options documented automatically.
 - **`--version`**, and citty validates required args with a clear error.
+- **Typo-friendly:** a mistyped subcommand prints a tight `did you mean \`mind issues next\`?`
+  (Damerau distance, so transpositions like `enxt`→`next` resolve) instead of dumping the full help.
 - **Pretty for humans:** color, tables (`id ls`, `codespaces repos`), spinners on
   network calls, and an interactive picker for `mind id use` (no arg).
 - **Clean for machines:** all styling auto-disables when stdout isn't a TTY, when
