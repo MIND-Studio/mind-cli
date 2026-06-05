@@ -1,0 +1,22 @@
+name: test
+
+# Smoke test: run the node:test round-trip suite (init → epic → new → full
+# lifecycle fold, resolver forms, WebID-label regression). The golden trio test
+# self-skips when the sibling mind-codespaces-v0 repo isn't checked out (it
+# isn't in CI), so CI exercises the standalone tracker without that fixture.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm test

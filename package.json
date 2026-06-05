@@ -15,6 +15,9 @@
   "bin": {
     "mind": "./bin/mind.mjs"
   },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
   "files": [
     "bin",
     "src",
