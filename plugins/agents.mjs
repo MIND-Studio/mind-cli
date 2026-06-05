@@ -26,6 +26,7 @@ import { dirname, join, resolve, relative } from "node:path";
 import { getActive } from "../src/store.mjs";
 import { foldTracker } from "../src/tracker/fold.mjs";
 import { resolveIssue } from "../src/tracker/author.mjs";
+import { agentQueue } from "../src/tracker/queue.mjs";
 import { emit, table, guard, sym, green, red, cyan, yellow, dim, bold } from "../src/ui.mjs";
 
 const J = { json: { type: "boolean", description: "machine-readable JSON output" } };
@@ -175,9 +176,20 @@ export function issueTask(i) {
   ].join("");
 }
 
-/** Resolve an issue ref (ULID / MC-N / #N / slug) against the repo's tracker fold. */
-function loadIssue(root, ref) {
-  const { epics } = foldTracker(root);
+/**
+ * Resolve an issue ref against the repo's tracker fold. The literal `next` picks
+ * the top of the agent queue (same ranking as `mind issues next`); anything else
+ * is a ULID / MC-N / #N / slug. `actorWebId` lets a claim the agent already holds
+ * count as claimable. Read-only — picking `next` here does not claim the issue.
+ */
+function loadIssue(root, ref, actorWebId = null) {
+  const { cfg, epics } = foldTracker(root);
+  if (String(ref).toLowerCase() === "next") {
+    const queue = agentQueue({ cfg, epics, actorWebId });
+    if (!queue.length)
+      throw new Error("no claimable agent work — queue is empty (see `mind issues next --all`).");
+    return queue[0];
+  }
   return resolveIssue(epics, ref); // throws a friendly error if unresolved
 }
 
@@ -223,7 +235,7 @@ const start = defineCommand({
   args: {
     persona: { type: "positional", required: true, description: "persona name (file in .mind/agents/)" },
     task: { type: "string", alias: "p", description: "run this task headless and exit (omit for interactive)" },
-    issue: { type: "string", alias: "i", description: "load a tracker issue (ULID/MC-N/slug) as the task" },
+    issue: { type: "string", alias: "i", description: "load a tracker issue as the task (ULID/MC-N/slug, or `next` for the top of the agent queue)" },
     backend: { type: "string", alias: "b", description: `codex|claude|gemini (default: persona's or ${DEFAULT_BACKEND})` },
     model: { type: "string", alias: "m", description: "model override" },
     "dry-run": { type: "boolean", description: "print the resolved backend/argv/task and exit (no spawn)" },
@@ -240,12 +252,22 @@ const start = defineCommand({
     if (!backend)
       throw new Error(`unknown backend "${backendName}" (have: ${Object.keys(BACKENDS).join(", ")})`);
 
+    // Active Solid identity (if any) — used both to resolve `--issue next` against
+    // the agent's own claims and to pass $MIND_* context to the child below.
+    let actorWebId = null;
+    try {
+      actorWebId = getActive().webId;
+    } catch {
+      /* no active identity — fine */
+    }
+
     // --issue seeds the task from the repo's tracker fold (loosely coupled: we read
-    // the issue body, we don't claim/close it). An explicit --task takes precedence.
+    // the issue body, we don't claim/close it). `--issue next` takes the top of the
+    // agent queue. An explicit --task takes precedence.
     let task = args.task;
     let issueRef = null;
     if (args.issue && !task) {
-      const i = loadIssue(root, args.issue);
+      const i = loadIssue(root, args.issue, actorWebId);
       issueRef = `MC-${i.number ?? "?"}`;
       task = issueTask(i);
     }
@@ -275,13 +297,15 @@ const start = defineCommand({
     // Expose the active Solid identity to the child as context (the backend still
     // authenticates with its own creds — codex/claude login ≠ the mind identity).
     const idEnv = {};
-    try {
-      const id = getActive();
-      idEnv.MIND_WEBID = id.webId;
-      idEnv.MIND_AUTHOR = id.webId;
-      if (id.podRoot) idEnv.MIND_POD_ROOT = id.podRoot;
-    } catch {
-      /* no active identity — fine, agents don't require one */
+    if (actorWebId) {
+      idEnv.MIND_WEBID = actorWebId;
+      idEnv.MIND_AUTHOR = actorWebId;
+      try {
+        const podRoot = getActive().podRoot;
+        if (podRoot) idEnv.MIND_POD_ROOT = podRoot;
+      } catch {
+        /* identity vanished between reads — ignore */
+      }
     }
 
     process.stderr.write(
