@@ -4,11 +4,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { parsePersona, BACKENDS, issueTask } from "../plugins/agents.mjs";
+import { parsePersona, readPersonas, BACKENDS, issueTask } from "../plugins/agents.mjs";
 
 test("parsePersona: frontmatter → meta, body → prompt", () => {
   const { meta, prompt } = parsePersona(
@@ -22,6 +22,22 @@ test("parsePersona: no frontmatter → whole text is the prompt", () => {
   const { meta, prompt } = parsePersona("just a system prompt");
   assert.deepEqual(meta, {});
   assert.equal(prompt, "just a system prompt");
+});
+
+test("readPersonas: carries model frontmatter through", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "mind-personas-"));
+  const agentsDir = join(cwd, "agents");
+  mkdirSync(agentsDir, { recursive: true });
+  writeFileSync(
+    join(agentsDir, "coder.md"),
+    `---\ndescription: "writes code"\nbackend: codex\nmodel: gpt-5.5\n---\nYou are coder.`,
+  );
+  writeFileSync(join(agentsDir, "reviewer.md"), `---\ndescription: "reviews code"\n---\nYou are reviewer.`);
+
+  assert.deepEqual(readPersonas(agentsDir), [
+    { name: "coder", description: "writes code", backend: "codex", model: "gpt-5.5" },
+    { name: "reviewer", description: "reviews code", backend: null, model: null },
+  ]);
 });
 
 test("codex backend: persona is prepended to the prompt (no system-prompt flag)", () => {
