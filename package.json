@@ -28,7 +28,8 @@
     "citty": "^0.1.6",
     "cli-table3": "^0.6.5",
     "ora": "^8.1.1",
-    "picocolors": "^1.1.1"
+    "picocolors": "^1.1.1",
+    "yaml": "^2.5.0"
   },
   "engines": {
     "node": ">=20"

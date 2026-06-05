@@ -14,6 +14,8 @@ mind whoami                      # who am I right now
 mind ls / · cat <p> · put <p> -  # read/write the active identity's pod
 mind grant <webid> <p> --modes r # share part of your pod (WAC)
 mind codespaces repos            # a plugin: drive the Solid Git bridge
+mind issues new "Fix it" --type bug   # a plugin: manage a local .mind tracker
+mind issues next --claim         #   …and the agent loop: grab the next ready issue
 ```
 
 ## Why it exists
@@ -130,6 +132,32 @@ Paths are pod-relative, or absolute `http(s)://` URLs (for cross-pod access you'
 | `mind codespaces new <name> [--private]` | create a repo (returns clone URL) |
 | `mind codespaces token <repo> [--label L]` | mint a git push token |
 
+**`issues`** — manage a local **`.mind/`** event-sourced issue tracker (the same
+markdown-folder + append-only `events/` format the codespaces bridge folds into
+`build/*.ttl`). Operates on the `.mind/` of the repo you're in (walks up from cwd
+like git); state is the **fold** of each issue's events, never a stored field.
+Fully standalone — its own fold + Turtle renderer (a faithful port of the
+codespaces `tracker-build`), no bridge or server required:
+
+| | |
+|---|---|
+| `mind issues init [--title T] [--namespace IRI]` | scaffold a fresh `.mind/` tracker here |
+| `mind issues epic <title> [--status S]` | create an epic (a goal grouping issues) |
+| `mind issues new "<title>" --type T [--priority P] [--epic SLUG]` | create an issue (interactive if `<title>` omitted) |
+| `mind issues list [--state/--type/--priority/--epic/--label/--mine/--open/--closed]` | folded board, grouped by epic |
+| `mind issues next [--claim] [--all]` | pick the next claimable issue for an agent (priority then lowest-ULID; `--claim` claims it; `--all` shows the whole ranked queue, read-only) |
+| `mind issues show <ref>` | one issue: folded facts + body + event timeline |
+| `mind issues triage <ref> --to S [--labels a,b] [--blocks REF,…]` | append a triage event (`--blocks` refs accept any form — ULID/`MC-N`/`#N`/`N`/slug — and are rejected if they don't resolve) |
+| `mind issues claim/release <ref>` | claim (→ in-progress, ttl) / release a claim |
+| `mind issues state <ref> --to S` · `handoff <ref>` · `comment <ref> -m …` · `link <ref> --pr B` | other lifecycle events |
+| `mind issues close <ref> [--to done\|wontfix]` | close an issue |
+| `mind issues build [--check]` | regenerate `build/{tracker,epics,state}.ttl` (`--check` = drift gate) |
+
+`<ref>` is a ULID, an `MC-NNNN`/`#NNNN`/`NNNN` display handle, or a slug. Events
+are authored as the active identity (or `--author`/`$MIND_AUTHOR`, falling back to
+a local user urn); `--agent` flips the actor to an agent and enforces the
+`AGENTS.md` rules (respect gate labels, never self-close).
+
 ## Writing a plugin
 
 Drop a `plugins/<name>.mjs` with a default export:
@@ -153,7 +181,7 @@ prototype/bridge.
 ## Notes & limits
 
 - **Local-first.** Default issuer is the mind-codespaces local CSS `:3011`.
-  Point at production with `--issuer https://codespaces-pod.duckdns.org/`.
+  Point at production with `--issuer https://pod.mindpods.org/`.
 - An identity only works while its CSS is up, and its creds go stale if that
   server's `.css-data/` is wiped — just `mind id create` again.
 - By default a WebID can only touch its **own** pod; `mind grant` (run by the
