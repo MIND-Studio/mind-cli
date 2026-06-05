@@ -20,6 +20,14 @@ import { emit, kv, table, spin, guard, sym, green, dim, cyan, interactive } from
 // is driven by ui.jsonMode (which reads argv), so it works anywhere.
 const J = { json: { type: "boolean", description: "machine-readable JSON output" } };
 
+// The store key for an identity: a filesystem- and CLI-safe slug of the handle
+// (lowercase, non-alphanumerics → "-", trimmed). Keeps `id create <h>` and
+// `id use <h>` symmetric and guarantees no space ever lands in a store filename.
+export function slugifyHandle(handle) {
+  const slug = String(handle).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "identity";
+}
+
 async function readStdin() {
   const chunks = [];
   for await (const c of process.stdin) chunks.push(c);
@@ -50,12 +58,16 @@ const idCreate = defineCommand({
   args: {
     handle: { type: "positional", required: true, description: "pod/handle name (e.g. claude)" },
     issuer: { type: "string", description: "OIDC issuer URL (default: $MIND_ISSUER or :3011)" },
-    name: { type: "string", description: "name to store it under (default: handle)" },
+    name: { type: "string", description: "display label for the identity (default: handle @ host)" },
     ...J,
   },
   run: guard(async ({ args }) => {
     const issuer = args.issuer || process.env.MIND_ISSUER || "http://localhost:3011/";
-    const name = args.name || args.handle;
+    // The store KEY is always the handle (slugified) so `id create X` and
+    // `id use X` are symmetric — `--name` is a human display label only, never
+    // the lookup key (a label with spaces would yield an un-`use`-able key and
+    // a filename with a space). See `slugifyHandle`.
+    const name = slugifyHandle(args.handle);
     const s = spin(`creating "${args.handle}" on ${issuer} …`);
     let creds;
     try {
@@ -65,7 +77,7 @@ const idCreate = defineCommand({
       s.fail("create failed");
       throw e;
     }
-    creds.label = `${args.handle} @ ${new URL(issuer).host}`;
+    creds.label = args.name || `${args.handle} @ ${new URL(issuer).host}`;
     creds.createdAt = new Date().toISOString();
     saveIdentity(name, creds);
     const active = getActiveName() === name;
