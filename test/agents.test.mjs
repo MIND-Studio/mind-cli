@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePersona, BACKENDS } from "../plugins/agents.mjs";
+import { parsePersona, BACKENDS, issueTask } from "../plugins/agents.mjs";
 
 test("parsePersona: frontmatter → meta, body → prompt", () => {
   const { meta, prompt } = parsePersona(
@@ -43,6 +43,15 @@ test("claude backend: persona as string, headless uses -p", () => {
   assert.deepEqual(interactive.args, ["--append-system-prompt", "be coder", "--add-dir", "."]);
   const headless = BACKENDS.claude.build({ personaText: "be coder", task: "ship it", interactive: false });
   assert.deepEqual(headless.args, ["--append-system-prompt", "be coder", "--add-dir", ".", "-p", "ship it"]);
+});
+
+test("issueTask: folds handle, title, body and a marching order into a prompt", () => {
+  const t = issueTask({ number: 20, category: "feature", state: "needs-triage", title: "do the thing", body: "details here" });
+  assert.match(t, /MC-20 \(feature, state: needs-triage\): do the thing/);
+  assert.match(t, /details here/);
+  assert.match(t, /Do not close or hand off the issue yourself\./);
+  // body-less issue still produces a usable prompt
+  assert.match(issueTask({ number: 7, title: "x" }), /MC-7 .*: x/);
 });
 
 test("gemini backend: persona via env var", () => {
