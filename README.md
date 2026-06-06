@@ -5,7 +5,7 @@ the terminal — for you, for scripts/CI, and for agents (this is how Claude act
 as its own WebID). Standalone Node bin, no build step.
 
 It's the headless twin of `mind-shared-ui` (the unified login *card*) and
-`mind-home-v0` (the GUI account front door): the same identity + pod
+`home` (the GUI account front door): the same identity + pod
 capabilities, exposed as commands.
 
 ```

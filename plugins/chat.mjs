@@ -5,7 +5,7 @@
 // Self-contained raw fetch + turtle (no @inrupt/solid-client) to match the rest
 // of the CLI (src/solid.mjs). The room is a SolidOS long-chat: messages live in
 // day files at <room>/<yyyy>/<MM>/<dd>/chat.ttl using the meeting/sioc/foaf/dct
-// vocab. Mirrors mind-chat-v0/scripts/chat-agent.ts and src/lib/solid/chat.ts.
+// vocab. Mirrors chat/scripts/chat-agent.ts and src/lib/solid/chat.ts.
 //
 // A plugin default-exports a citty command; its filename becomes the group name.
 

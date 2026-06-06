@@ -1,7 +1,7 @@
 // Render the folded tracker into the canonical `{tracker,epics,state}.ttl` trio.
 //
 // BYTE-FAITHFUL PORT of the render* functions in
-// mind-codespaces-v0/src/lib/tracker/build.ts. Every concat order, the
+// codespaces/src/lib/tracker/build.ts. Every concat order, the
 // `replace(/ ;\n$/, " .\n")` close-statement trick, the per-file prefix lists,
 // and the base IRIs must match exactly or the golden diff against that repo's
 // committed build/*.ttl will fail. Do not "tidy" this — keep it identical.

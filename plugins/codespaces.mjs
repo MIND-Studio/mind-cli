@@ -52,7 +52,7 @@ async function api(path, id, init = {}) {
       ...(init.headers || {}),
     },
   }).catch((e) => {
-    throw new Error(`bridge unreachable at ${BRIDGE} (${e.message}). Start it: cd mind-codespaces-v0 && npm run dev`);
+    throw new Error(`bridge unreachable at ${BRIDGE} (${e.message}). Start it: cd codespaces && npm run dev`);
   });
   const text = await res.text();
   let body;

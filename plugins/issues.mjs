@@ -3,7 +3,7 @@
 // Operates on the `.mind/` of the current repo (walks up from cwd like git).
 // Issues are markdown folders; state is the FOLD of an append-only events/ log.
 // This plugin is the thin citty surface; the work lives in ../src/tracker/*:
-//   fold/render (a faithful port of mind-codespaces-v0's tracker build), author
+//   fold/render (a faithful port of codespaces's tracker build), author
 //   (local-FS writes), scaffold (init), actor (who authors an event).
 
 import { defineCommand } from "citty";

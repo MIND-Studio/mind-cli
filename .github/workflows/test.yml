@@ -2,7 +2,7 @@ name: test
 
 # Smoke test: run the node:test round-trip suite (init → epic → new → full
 # lifecycle fold, resolver forms, WebID-label regression). The golden trio test
-# self-skips when the sibling mind-codespaces-v0 repo isn't checked out (it
+# self-skips when the sibling codespaces repo isn't checked out (it
 # isn't in CI), so CI exercises the standalone tracker without that fixture.
 
 on:

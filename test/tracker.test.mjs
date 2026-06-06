@@ -4,7 +4,7 @@
 // Two kinds of check:
 //  1. round-trip — init → epic → new → full lifecycle in a tmp dir, asserting the
 //     fold reflects each event and the build trio stays consistent.
-//  2. golden — if the sibling mind-codespaces-v0 repo is present, assert our fold
+//  2. golden — if the sibling codespaces repo is present, assert our fold
 //     reproduces its committed build/*.ttl byte-for-byte (the port-fidelity gate).
 
 import { test } from "node:test";
@@ -237,9 +237,9 @@ test("guards: no-op close and holderless release are refused, --force overrides"
 });
 
 test("golden: fold reproduces the codespaces build trio byte-for-byte", (t) => {
-  const cs = join(HERE, "..", "..", "mind-codespaces-v0");
+  const cs = join(HERE, "..", "..", "codespaces");
   if (!existsSync(join(cs, ".mind", "build", "state.ttl"))) {
-    t.skip("sibling mind-codespaces-v0 not present");
+    t.skip("sibling codespaces not present");
     return;
   }
   const { outputs } = buildTrackerOutputs(cs);

@@ -1,5 +1,5 @@
 // Author the local `.mind/issues/` tree directly on disk — the filesystem mirror
-// of mind-codespaces-v0/src/lib/tracker/author.ts (which does the same writes but
+// of codespaces/src/lib/tracker/author.ts (which does the same writes but
 // into a hosted bare git repo via checkout/commit/push). No git here: we write
 // the markdown into the working tree, then re-fold + rewrite the build trio.
 

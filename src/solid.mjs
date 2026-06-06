@@ -17,9 +17,9 @@ const WORKSPACE = join(HERE, "..", ".."); // mind-prototypes/
 // Candidate roots that own @inrupt/solid-client-authn-node, in priority order.
 const DEP_ROOTS = [
   join(HERE, ".."), // mind-cli itself (after npm install)
-  join(WORKSPACE, "mind-codespaces-v0"),
-  join(WORKSPACE, "mind-hermes-v0"),
-  join(WORKSPACE, "mind-agents-v0"),
+  join(WORKSPACE, "codespaces"),
+  join(WORKSPACE, "hermes"),
+  join(WORKSPACE, "agents"),
 ];
 
 let _Session = null;
@@ -36,7 +36,7 @@ export function getSession() {
   }
   throw new Error(
     "could not find @inrupt/solid-client-authn-node. Run `npm install` in mind-cli/, " +
-      "or keep a sibling prototype (mind-codespaces-v0) with its deps installed.",
+      "or keep a sibling prototype (codespaces) with its deps installed.",
   );
 }
 

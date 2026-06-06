@@ -1,7 +1,7 @@
 // Fold the Markdown-authored, event-sourced `.mind/issues/` tree into the
 // in-memory model + the canonical `build/*.ttl` trio.
 //
-// PORT of mind-codespaces-v0/src/lib/tracker/build.ts (the authoritative fold)
+// PORT of codespaces/src/lib/tracker/build.ts (the authoritative fold)
 // at the v0.1 tracker layout. Kept byte-faithful so `mind issues build` produces
 // the same trio as that repo's `npm run tracker:build`; the golden test in
 // test/ diffs against its committed build/*.ttl. When build.ts changes, re-sync
