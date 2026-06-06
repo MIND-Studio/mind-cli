@@ -82,10 +82,10 @@ function foldEvents(cfg, eventsDir, rel) {
   let labels = [];
   let blocks = [];
   let lastAt;
-  // States a claim enters that therefore KEEP the holder when a non-claim event
-  // transitions into them. Covers this CLI's `doing` and the codespaces tracker's
-  // `in-progress` (the golden fold), so the holder-clear rule is correct for both.
-  const WORKING = new Set(["in-progress", "doing"]);
+  // The state a claim enters that therefore KEEPS the holder when a non-claim
+  // event transitions into it. Both this CLI and the codespaces tracker (the
+  // golden fold) now use `doing`, so the holder-clear rule is correct for both.
+  const WORKING = new Set(["doing"]);
   for (const { f, data } of events) {
     if (data.at != null) lastAt = data.at;
     if (data.priority != null) priority = String(data.priority);
