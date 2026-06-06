@@ -15,7 +15,7 @@ This tracker is read and written by agents. These rules are binding.
   Do not edit `issue.md`'s body to record state.
 - **Claim before working** (`mind issues claim <ref>`). Claims carry a ttl; lowest ULID wins ties.
 - **Suggest, don't decide. Never self-close** — hand back with `mind issues handoff` to
-  `ready-for-human`.
+  `review`.
 - **Respect gates.** Do not pick up issues labelled `human-only`, `needs-design`, or `blocked`.
 
 ## Event kinds

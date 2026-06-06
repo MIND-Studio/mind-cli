@@ -2,28 +2,22 @@
 title: "mind-cli"
 description: "Epic-scoped, event-sourced. Issues are markdown folders with an append-only events/ log; `mind issues build` folds events to build/*.ttl. This frontmatter is the authoritative vocab."
 namespace: "https://mindpods.org/ns/mind-cli#"
-initialState: needs-triage
+initialState: todo
 # Current state is the FOLD of an issue's events/ — never a field on issue.md.
 # These are the legal `state:` values an event may transition `to:`.
+# Four lanes a human reads at a glance: todo → doing → review → done.
 states:
-  - id: needs-triage
-    label: "needs triage"
+  - id: todo
+    label: "to do"
     open: true
-    handoff: human
-  - id: ready-for-agent
-    label: "ready for agent"
+    handoff: agent      # any open todo is claimable by an agent (gate it with a label to keep it human-only)
+  - id: doing
+    label: "doing"
     open: true
-    handoff: agent
-  - id: ready-for-human
-    label: "ready for human"
+  - id: review
+    label: "review"
     open: true
-    handoff: human
-  - id: in-progress
-    label: "in progress"
-    open: true
-  - id: blocked
-    label: "blocked"
-    open: true
+    handoff: human      # an agent hands work back here for a human to check
   - id: done
     label: "done"
     open: false

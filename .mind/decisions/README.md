@@ -3,7 +3,7 @@
 This folder holds **mind-cli's own** architecture decisions (ADRs) — *why this project* is shaped
 the way it is. One file per decision, append-only, supersede-don't-edit.
 
-As project-specific calls are made *through the tracker* (a `ready-for-human` issue resolved by a
+As project-specific calls are made *through the tracker* (a `review` issue resolved by a
 design choice), capture the rationale here and link it from the issue. The first such call is
 [`0001-codespaces-prod-auth.md`](0001-codespaces-prod-auth.md) (MC-15).
 

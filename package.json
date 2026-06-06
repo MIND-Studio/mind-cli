@@ -1,6 +1,6 @@
 {
   "name": "@mind-studio/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "mind — one CLI to manage Solid identities and drive Mind prototypes from the terminal. citty command layer, plugin seam for per-prototype command groups (codespaces, …).",
   "type": "module",
   "license": "MIT",

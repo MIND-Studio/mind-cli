@@ -60,7 +60,7 @@ export async function loginAs(identity) {
 export function resolvePodPath(identity, path) {
   if (!path || path === "/" || path === ".") return identity.podRoot;
   if (/^https?:\/\//.test(path)) return path;
-  return identity.podRoot.replace(/\/$/, "/") + String(path).replace(/^\//, "");
+  return identity.podRoot.replace(/\/$/, "") + "/" + String(path).replace(/^\//, "");
 }
 
 export function parseContainer(ttl) {

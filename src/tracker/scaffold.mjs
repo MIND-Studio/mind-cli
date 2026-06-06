@@ -13,28 +13,22 @@ function trackerConfig(title, namespace) {
 title: ${JSON.stringify(title)}
 description: "Epic-scoped, event-sourced. Issues are markdown folders with an append-only events/ log; \`mind issues build\` folds events to build/*.ttl. This frontmatter is the authoritative vocab."
 namespace: ${JSON.stringify(namespace)}
-initialState: needs-triage
+initialState: todo
 # Current state is the FOLD of an issue's events/ — never a field on issue.md.
 # These are the legal \`state:\` values an event may transition \`to:\`.
+# Four lanes a human reads at a glance: todo → doing → review → done.
 states:
-  - id: needs-triage
-    label: "needs triage"
+  - id: todo
+    label: "to do"
     open: true
-    handoff: human
-  - id: ready-for-agent
-    label: "ready for agent"
+    handoff: agent      # any open todo is claimable by an agent (gate it with a label to keep it human-only)
+  - id: doing
+    label: "doing"
     open: true
-    handoff: agent
-  - id: ready-for-human
-    label: "ready for human"
+  - id: review
+    label: "review"
     open: true
-    handoff: human
-  - id: in-progress
-    label: "in progress"
-    open: true
-  - id: blocked
-    label: "blocked"
-    open: true
+    handoff: human      # an agent hands work back here for a human to check
   - id: done
     label: "done"
     open: false
@@ -88,7 +82,7 @@ state of everything is *derived* — never hand-set.
 > **The path carries immutable context. The \`events/\` log carries state.**
 
 A folder name only ever encodes facts that never change — the epic, the date it was filed.
-Everything that *moves* — open → in-progress → done, who claimed it, priority, labels — lives in
+Everything that *moves* — todo → doing → review → done, who claimed it, priority, labels — lives in
 the issue's \`events/\` log. Current state is the **fold** of that log.
 
 ## Layout
@@ -115,14 +109,18 @@ the issue's \`events/\` log. Current state is the **fold** of that log.
 
 ## Drive it with the mind CLI
 
+The everyday path is three verbs — no flags, no ceremony:
+
 \`\`\`bash
-mind issues new "Fix the thing" --type bug --priority high
-mind issues list
-mind issues show MC-1
-mind issues triage MC-1 --to ready-for-agent --labels area:io
-mind issues claim MC-1
-mind issues close MC-1 --to done
+mind issues add "Fix the thing"   # file it (todo)
+mind issues                       # the board: todo · doing · review · done
+mind issues start MC-1            # you're on it (→ doing)
+mind issues done MC-1             # finished (→ done)
+mind issues show MC-1            # the full story, as an activity feed
 \`\`\`
+
+Coordination verbs (claim/handoff/triage/close/build, \`--agent\`, ttls) are still there for
+multi-agent work — see \`mind issues --help\`.
 `;
 
 const AGENTS = `# AGENTS.md — machine contract for \`.mind\`
@@ -142,7 +140,7 @@ This tracker is read and written by agents. These rules are binding.
   Do not edit \`issue.md\`'s body to record state.
 - **Claim before working** (\`mind issues claim <ref>\`). Claims carry a ttl; lowest ULID wins ties.
 - **Suggest, don't decide. Never self-close** — hand back with \`mind issues handoff\` to
-  \`ready-for-human\`.
+  \`review\`.
 - **Respect gates.** Do not pick up issues labelled \`human-only\`, \`needs-design\`, or \`blocked\`.
 
 ## Event kinds

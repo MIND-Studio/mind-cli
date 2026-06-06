@@ -2,8 +2,11 @@
 // citty gives us typed args, auto-generated --help, and nested subcommands.
 
 import { defineCommand } from "citty";
+import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   listIdentities,
   getIdentity,
@@ -16,9 +19,33 @@ import {
 import { loginAs, resolvePodPath, parseContainer, createIdentity, grant as wacGrant } from "./solid.mjs";
 import { emit, kv, table, spin, guard, sym, green, dim, cyan, interactive } from "./ui.mjs";
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+const PKG = JSON.parse(readFileSync(join(HERE, "..", "package.json"), "utf8"));
+const INSTALL_COMMAND = "curl -fsSL https://raw.githubusercontent.com/MIND-Studio/mind-cli/main/install.sh | bash";
+
 // `--json` is declared on every command so it shows in help; actual behaviour
 // is driven by ui.jsonMode (which reads argv), so it works anywhere.
 const J = { json: { type: "boolean", description: "machine-readable JSON output" } };
+
+export function updateCommand({ ref, env = {} } = {}) {
+  const resolvedRef = ref || env.MIND_CLI_REF || null;
+  return {
+    command: INSTALL_COMMAND,
+    ref: resolvedRef,
+    env: resolvedRef ? { ...env, MIND_CLI_REF: resolvedRef } : { ...env },
+  };
+}
+
+function requireCurl() {
+  const r = spawnSync("curl", ["--version"], { stdio: "ignore" });
+  if (r.error?.code === "ENOENT") {
+    throw new Error(
+      "curl is required to update mind, but it was not found on PATH.\n" +
+        "Install curl, or inspect and run install.sh manually from https://github.com/MIND-Studio/mind-cli.",
+    );
+  }
+  if (r.error) throw r.error;
+}
 
 // The store key for an identity: a filesystem- and CLI-safe slug of the handle
 // (lowercase, non-alphanumerics → "-", trimmed). Keeps `id create <h>` and
@@ -222,6 +249,38 @@ const whoami = defineCommand({
   }),
 });
 
+const update = defineCommand({
+  meta: { name: "update", description: "update the CLI by re-running the installer" },
+  args: {
+    ref: { type: "string", description: "pin installer to a tag or branch (sets MIND_CLI_REF)" },
+    "dry-run": { type: "boolean", description: "print the update command without running it" },
+    ...J,
+  },
+  run: guard(async ({ args }) => {
+    const planned = updateCommand({ ref: args.ref, env: process.env });
+    if (args["dry-run"]) {
+      emit({ ok: true, ref: planned.ref, command: planned.command }, () => {
+        kv([
+          ["command", planned.command],
+          ["ref", planned.ref || "(default)"],
+        ]);
+      });
+      return;
+    }
+
+    requireCurl();
+    console.error(`mind ${PKG.version}`);
+    const child = spawn("bash", ["-c", planned.command], { stdio: "inherit", env: planned.env });
+    await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code, signal) => {
+        process.exitCode = code ?? (signal ? 1 : 0);
+        resolve();
+      });
+    });
+  }),
+});
+
 const ls = defineCommand({
   meta: { name: "ls", description: "list a pod container (as the active identity)" },
   args: { path: { type: "positional", required: false, description: "container path or URL (default: pod root)" }, ...J },
@@ -321,4 +380,4 @@ const grant = defineCommand({
   ),
 });
 
-export const coreCommands = { id: idCmd, whoami, ls, cat, put, mkdir, rm, grant };
+export const coreCommands = { id: idCmd, whoami, update, upgrade: update, ls, cat, put, mkdir, rm, grant };
