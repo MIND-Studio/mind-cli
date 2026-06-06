@@ -53,12 +53,15 @@ function requireState(cfg, to, { closedOnly = false } = {}) {
 }
 
 // Color function for a state id (so callers can pad raw text, then color it).
+// Open lanes: todo = yellow (waiting), doing = cyan (active), review/other =
+// green (ready for a look). Closed: wontfix = gray, done = dim. Falls back
+// sensibly for any custom vocab (e.g. a legacy needs-triage/blocked tracker).
 function stateColor(cfg, id) {
   const s = cfg.states.find((x) => x.id === id);
   if (!s) return yellow;
   if (!s.open) return id === "wontfix" ? gray : dim;
-  if (id === "needs-triage" || id === "blocked") return yellow;
-  if (id === "in-progress") return cyan;
+  if (id === "todo" || id === "needs-triage" || id === "blocked") return yellow;
+  if (id === "doing" || id === "in-progress") return cyan;
   return green;
 }
 function paintState(cfg, id) {
@@ -125,7 +128,7 @@ function runList(args) {
       })),
     },
     () => {
-      if (!groups.length) return console.log(dim('no issues yet — `mind issues new "<title>"`'));
+      if (!groups.length) return console.log(dim('no issues yet — `mind issues add "<title>"`'));
 
       // One aligned line per issue, no box drawing. Widths are global across all
       // groups so columns line up the whole way down. A leading glyph flags
@@ -213,10 +216,15 @@ function runBoard(args) {
       })),
     },
     () => {
-      if (!lanes.length) return console.log(dim('no issues yet — `mind issues new "<title>"`'));
+      if (!lanes.length) return console.log(dim('no issues yet — `mind issues add "<title>"`'));
       const wId = Math.max(...all.map((i) => handle(i).length));
       const total = all.length;
-      for (const l of lanes) {
+      // Open lanes (todo/doing/review) are shown in full; closed lanes
+      // (done/wontfix) are noise on a working board, so collapse them into one
+      // summary line unless --all. `done` is where finished work goes to rest.
+      const openLanes = lanes.filter((l) => l.state.open);
+      const closedLanes = lanes.filter((l) => !l.state.open);
+      for (const l of openLanes) {
         const color = stateColor(cfg, l.state.id);
         console.log(`\n${color(bold(l.state.label ?? l.state.id))} ${dim(`· ${l.issues.length}`)}`);
         for (const i of l.issues) {
@@ -230,26 +238,43 @@ function runBoard(args) {
           );
         }
       }
-      console.log(dim(`\n${total} issue${total === 1 ? "" : "s"}`));
+      if (closedLanes.length) {
+        const closedTotal = closedLanes.reduce((n, l) => n + l.issues.length, 0);
+        if (args.all) {
+          for (const l of closedLanes) {
+            console.log(`\n${dim(bold(l.state.label ?? l.state.id))} ${dim(`· ${l.issues.length}`)}`);
+            for (const i of l.issues)
+              console.log(`  ${priMark(i.priority)} ${cyan(handle(i).padEnd(wId))}  ${dim(i.title)}`);
+          }
+        } else {
+          console.log(dim(`\nDone · ${closedTotal}  ${dim("(--all to show)")}`));
+        }
+      }
+      if (!openLanes.length && !args.all)
+        console.log(dim("\nnothing open — nice. `mind issues add \"<title>\"` to file the next one."));
     },
   );
 }
 
+// Shared filter/view args for the board (and the bare `mind issues` default).
+const BOARD_ARGS = {
+  all: { type: "boolean", description: "include the collapsed Done lane" },
+  state: { type: "string", description: "filter by state id" },
+  type: { type: "string", description: "filter by category" },
+  priority: { type: "string", description: "filter by priority" },
+  epic: { type: "string", description: "filter by epic slug" },
+  label: { type: "string", description: "filter by label" },
+  mine: { type: "boolean", description: "only issues you hold" },
+  open: { type: "boolean", description: "only open states" },
+  closed: { type: "boolean", description: "only closed states" },
+  ...ACTOR,
+  ...DIR,
+  ...J,
+};
+
 const board = defineCommand({
-  meta: { name: "board", description: "kanban view: issues grouped by state lane (same filters as list)" },
-  args: {
-    state: { type: "string", description: "filter by state id" },
-    type: { type: "string", description: "filter by category" },
-    priority: { type: "string", description: "filter by priority" },
-    epic: { type: "string", description: "filter by epic slug" },
-    label: { type: "string", description: "filter by label" },
-    mine: { type: "boolean", description: "only issues you hold" },
-    open: { type: "boolean", description: "only open states" },
-    closed: { type: "boolean", description: "only closed states" },
-    ...ACTOR,
-    ...DIR,
-    ...J,
-  },
+  meta: { name: "board", description: "the board: issues grouped into lanes (todo · doing · review · done)" },
+  args: BOARD_ARGS,
   run: guard(async ({ args }) => runBoard(args)),
 });
 
@@ -271,11 +296,11 @@ function runNext(args) {
     appendEvent(
       root,
       pick,
-      { kind: "claim", to: "in-progress", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } },
+      { kind: "claim", to: "doing", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } },
       actor,
       "Claimed.",
     );
-    pick.state = "in-progress";
+    pick.state = "doing";
     pick.assignee = actor.webId;
   }
 
@@ -306,7 +331,7 @@ function runNext(args) {
 const next = defineCommand({
   meta: { name: "next", description: "pick the next claimable issue for an agent (ranked queue)" },
   args: {
-    claim: { type: "boolean", description: "claim the picked issue immediately (→ in-progress)" },
+    claim: { type: "boolean", description: "claim the picked issue immediately (→ doing)" },
     force: { type: "boolean", description: "with --claim: steal a live claim" },
     all: { type: "boolean", description: "show the whole ranked queue, not just the top pick (read-only)" },
     ...ACTOR,
@@ -329,8 +354,30 @@ function readEvents(absDir) {
     });
 }
 
+// One plain-English line for an event, for the `show` activity feed. Turns the
+// raw kind/to into something a person reads as a changelog. Legacy state ids in
+// historical events are shown verbatim (that's what actually happened).
+function eventPhrase(e) {
+  const arrow = (s) => `${dim("→")} ${cyan(s)}`;
+  switch (e.kind) {
+    case "open": return dim(`filed this${e.type ? ` (${e.type})` : ""}`);
+    case "triage": return e.to ? `triaged ${arrow(e.to)}` : dim("triaged it");
+    case "claim": return `started work${e.to ? " " + arrow(e.to) : ""}`;
+    case "release": return dim("released the claim");
+    case "handoff": return `handed back${e.to ? " " + arrow(e.to) : ""}`;
+    case "state": return e.to ? `moved ${arrow(e.to)}` : dim("changed state");
+    case "link": return `linked ${cyan(e.pr ?? "a PR")}`;
+    case "comment": {
+      const first = (e.body ?? "").split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+      return dim("commented:") + (first ? " " + first : "");
+    }
+    case "close": return `marked it ${cyan(e.to ?? "done")}`;
+    default: return dim(e.kind) + (e.to ? " " + arrow(e.to) : "");
+  }
+}
+
 const show = defineCommand({
-  meta: { name: "show", description: "show one issue: folded facts, body, and event timeline" },
+  meta: { name: "show", description: "show one issue: facts, body, and a plain activity feed" },
   args: {
     ref: { type: "positional", required: true, description: "issue ULID, MC-NNNN, or slug" },
     ...DIR,
@@ -341,29 +388,32 @@ const show = defineCommand({
     const i = resolveIssue(epics, args.ref);
     const events = readEvents(i.absDir);
     emit({ issue: { ...i, absDir: undefined, epic: i.epic?.isGeneral ? "general" : i.epic?.slug }, events }, () => {
-      kv([
-        ["handle", cyan(handle(i))],
-        ["id", i.id],
-        ["title", bold(i.title)],
+      // Headline: handle · title · state. The raw ULID stays in --json only —
+      // a human never types it (they use MC-N / the slug), so it's just noise here.
+      console.log(`${cyan(handle(i))}  ${bold(i.title)}  ${paintState(cfg, i.state)}`);
+      const facts = [
         ["type", i.category],
-        ["state", paintState(cfg, i.state)],
         ["priority", i.priority ?? "—"],
         ["epic", i.epic?.isGeneral ? "general" : i.epic?.slug ?? "—"],
-        ["holder", i.assignee ? lastSeg(i.assignee) + (staleMark(i) ? " (stale)" : "") : "—"],
-        ["labels", i.labels.length ? i.labels.join(", ") : "—"],
-        ["blocks", i.blocks.map((b) => "MC-" + handleNumber(b)).join(", ") || "—"],
-        ["blockedBy", i.blockedBy.map((b) => "MC-" + handleNumber(b)).join(", ") || "—"],
-        ["afk", i.afk == null ? "—" : String(i.afk)],
-        ["created", i.created ?? "—"],
-        ["modified", i.modified ?? "—"],
-      ]);
+      ];
+      if (i.assignee) facts.push(["holder", lastSeg(i.assignee) + (staleMark(i) ? " (stale)" : "")]);
+      if (i.labels.length) facts.push(["labels", i.labels.join(", ")]);
+      if (i.blocks.length) facts.push(["blocks", i.blocks.map((b) => "MC-" + handleNumber(b)).join(", ")]);
+      if (i.blockedBy.length) facts.push(["blockedBy", i.blockedBy.map((b) => "MC-" + handleNumber(b)).join(", ")]);
+      kv(facts);
       if (i.body) console.log(`\n${i.body}\n`);
-      console.log(bold("events:"));
+
+      // Activity: the event log as a plain-English changelog, not a kind→state dump.
+      console.log(bold("activity:"));
       for (const e of events) {
         const when = String(e.at ?? "").slice(0, 16).replace("T", " "); // YYYY-MM-DD HH:MM
-        const move = e.to ? dim(` → ${e.to}`) : "";
-        console.log(`  ${dim(when)} ${cyan(e.kind)} ${dim(lastSeg(e.actor ?? "?"))}${move}`);
-        if (e.body) console.log(e.body.split("\n").map((l) => "    " + dim(l)).join("\n"));
+        const who = lastSeg(e.actor ?? "?");
+        console.log(`  ${dim(when)}  ${who} ${eventPhrase(e)}`);
+        // comment bodies are already inlined into the phrase; for other kinds,
+        // show a non-boilerplate note indented under the line.
+        const note = (e.body ?? "").trim();
+        if (note && e.kind !== "comment" && note !== "Opened via the mind CLI.")
+          console.log(note.split("\n").map((l) => "    " + dim(l)).join("\n"));
       }
     });
   }),
@@ -371,10 +421,10 @@ const show = defineCommand({
 
 // ── new (create issue) ──────────────────────────────────────────────────────────
 const create = defineCommand({
-  meta: { name: "new", description: "create an issue (writes issue.md + an open event)" },
+  meta: { name: "add", description: "file a new issue — title only; --type optional (→ todo)" },
   args: {
     title: { type: "positional", required: false, description: "issue title (omit for interactive)" },
-    type: { type: "string", description: "category (feature/bug/refactor/chore/docs)" },
+    type: { type: "string", description: "category (default chore; feature/bug/refactor/chore/docs)" },
     priority: { type: "string", description: "urgent|high|normal|low (default normal)" },
     epic: { type: "string", description: "epic slug (default: general lane)" },
     body: { type: "string", description: "markdown body" },
@@ -411,8 +461,10 @@ const create = defineCommand({
       body = b;
     }
 
-    if (!title) throw new Error('title is required (e.g. mind issues new "Fix the thing" --type bug)');
-    if (!type) throw new Error(`--type is required (one of: ${cfg.categories.map((c) => c.id).join(", ")})`);
+    if (!title) throw new Error('title is required (e.g. mind issues add "Fix the thing")');
+    // --type is optional on the everyday path: default to `chore` (the neutral
+    // catch-all), or the first declared category if a custom vocab lacks it.
+    if (!type) type = cfg.categories.some((c) => c.id === "chore") ? "chore" : cfg.categories[0].id;
 
     const res = createIssue(
       root,
@@ -429,7 +481,7 @@ const create = defineCommand({
 
 // ── epic ──────────────────────────────────────────────────────────────────────
 const epic = defineCommand({
-  meta: { name: "epic", description: "create an epic (a goal grouping issues)" },
+  meta: { name: "epic", description: "(advanced) create an epic (a goal grouping issues)" },
   args: {
     title: { type: "positional", required: true, description: "epic title" },
     status: { type: "string", description: "planned|active|done|parked (default planned)" },
@@ -464,7 +516,9 @@ function eventCmd({ name, description, build, extraArgs = {} }) {
       const res = appendEvent(root, issue, spec, actor, spec.message ?? args.message ?? defaultMsg(spec.kind));
       emit({ ok: true, id: res.id, ref: handle(issue), kind: spec.kind, to: spec.to ?? null }, () => {
         const move = spec.to ? dim(` → ${spec.to}`) : "";
-        console.log(`${sym.ok} ${spec.kind} ${cyan(handle(issue))}${move} ${dim(res.id)}`);
+        // `verb` lets a friendly wrapper (start/done) say what the user typed,
+        // not the underlying event kind (claim/close).
+        console.log(`${sym.ok} ${spec.verb ?? spec.kind} ${cyan(handle(issue))}${move} ${dim(res.id)}`);
       });
     }),
   });
@@ -476,9 +530,9 @@ function defaultMsg(kind) {
 
 const triage = eventCmd({
   name: "triage",
-  description: "triage an issue (set state/labels/blocks)",
+  description: "(advanced) triage an issue (set state/labels/blocks)",
   extraArgs: {
-    to: { type: "string", description: "target state (e.g. ready-for-agent)" },
+    to: { type: "string", description: "target state (e.g. review)" },
     labels: { type: "string", description: "comma-separated labels (e.g. area:io,security)" },
     blocks: { type: "string", description: "comma-separated issue ULIDs this blocks" },
   },
@@ -500,7 +554,7 @@ const triage = eventCmd({
 
 const claim = eventCmd({
   name: "claim",
-  description: "claim an issue (→ in-progress, with a ttl)",
+  description: "(advanced) claim an issue (→ doing, with a ttl)",
   extraArgs: {
     ttl: { type: "string", description: "ISO-8601 duration (default from config.coordination.claimTtl)" },
     force: { type: "boolean", description: "steal a live claim held by someone else" },
@@ -509,13 +563,13 @@ const claim = eventCmd({
     assertClaimable(cfg, issue, actor, { force: args.force });
     const ttl = args.ttl || cfg.claimTtl || "PT2H";
     const at = new Date();
-    return { kind: "claim", to: "in-progress", extra: { ttl, expiresAt: addDuration(at, ttl).toISOString() } };
+    return { kind: "claim", to: "doing", extra: { ttl, expiresAt: addDuration(at, ttl).toISOString() } };
   },
 });
 
 const release = eventCmd({
   name: "release",
-  description: "release your claim on an issue",
+  description: "(advanced) release your claim on an issue",
   extraArgs: { force: { type: "boolean", description: "record a release even with no active claim" } },
   build: ({ args, issue, actor }) => {
     assertReleasable(issue, actor, { force: args.force });
@@ -525,7 +579,7 @@ const release = eventCmd({
 
 const state = eventCmd({
   name: "state",
-  description: "generic state transition",
+  description: "(advanced) generic state transition",
   extraArgs: { to: { type: "string", required: true, description: "target state" } },
   build: ({ args, cfg }) => {
     requireState(cfg, args.to);
@@ -535,13 +589,13 @@ const state = eventCmd({
 
 const handoff = eventCmd({
   name: "handoff",
-  description: "hand back to a human (→ ready-for-human)",
-  build: ({ issue }) => ({ kind: "handoff", from: issue.state, to: "ready-for-human" }),
+  description: "(advanced) hand back to a human (→ review)",
+  build: ({ issue }) => ({ kind: "handoff", from: issue.state, to: "review" }),
 });
 
 const comment = eventCmd({
   name: "comment",
-  description: "add a comment event",
+  description: "(advanced) add a comment event",
   build: ({ args }) => {
     if (!args.message) throw new Error("comment needs --message/-m");
     return { kind: "comment" };
@@ -550,14 +604,14 @@ const comment = eventCmd({
 
 const link = eventCmd({
   name: "link",
-  description: "record a PR / branch link",
+  description: "(advanced) record a PR / branch link",
   extraArgs: { pr: { type: "string", required: true, description: "PR branch or URL" } },
   build: ({ args }) => ({ kind: "link", extra: { pr: args.pr } }),
 });
 
 const close = eventCmd({
   name: "close",
-  description: "close an issue (→ done|wontfix)",
+  description: "(advanced) close an issue (→ done|wontfix; humans only)",
   extraArgs: {
     to: { type: "string", description: "done|wontfix (default done)" },
     resolution: { type: "string", description: "resolution note (e.g. fixed)" },
@@ -571,9 +625,35 @@ const close = eventCmd({
   },
 });
 
+// ── start / done (the everyday human verbs) ─────────────────────────────────────
+// `start` and `done` wrap the claim→close ceremony so a person never has to know
+// about claims, ttls, actorKind, or handoff for the common case. Both reuse the
+// same guards + appendEvent the advanced verbs do — they are sugar, not a second
+// code path. Actor is auto-resolved (default kind: human).
+const start = eventCmd({
+  name: "start",
+  description: "start work on an issue (→ doing)",
+  build: ({ cfg, issue, actor }) => {
+    assertClaimable(cfg, issue, actor, {});
+    const ttl = cfg.claimTtl || "PT2H";
+    return { kind: "claim", verb: "started", to: "doing", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } };
+  },
+});
+
+const finish = eventCmd({
+  name: "done",
+  description: "mark an issue done (→ done)",
+  extraArgs: { force: { type: "boolean", description: "override the no-op / self-close guard" } },
+  build: ({ args, cfg, issue, actor }) => {
+    requireState(cfg, "done", { closedOnly: true });
+    assertClosable(issue, actor, { to: "done", force: args.force });
+    return { kind: "close", verb: "done", from: issue.state, to: "done", extra: { resolution: "fixed" } };
+  },
+});
+
 // ── init ──────────────────────────────────────────────────────────────────────
 const init = defineCommand({
-  meta: { name: "init", description: "scaffold a fresh .mind/ tracker here" },
+  meta: { name: "init", description: "(advanced) scaffold a fresh .mind/ tracker here" },
   args: {
     title: { type: "string", description: "tracker title" },
     namespace: { type: "string", description: "RDF namespace IRI (default https://mindpods.org/ns/<slug>#)" },
@@ -589,14 +669,14 @@ const init = defineCommand({
       console.log(`${sym.ok} initialised tracker at ${dim(res.mind)}`);
       console.log(`  ${dim("title")}     ${res.title}`);
       console.log(`  ${dim("namespace")} ${res.namespace}`);
-      console.log(`\n  ${dim("next:")} mind issues new "Your first issue" --type chore`);
+      console.log(`\n  ${dim("next:")} mind issues add "Your first issue"`);
     });
   }),
 });
 
 // ── build ──────────────────────────────────────────────────────────────────────
 const build = defineCommand({
-  meta: { name: "build", description: "regenerate build/{tracker,epics,state}.ttl from the fold" },
+  meta: { name: "build", description: "(advanced) regenerate build/{tracker,epics,state}.ttl from the fold" },
   args: {
     check: { type: "boolean", description: "diff vs committed build/ and exit 1 on drift (no write)" },
     ...DIR,
@@ -641,16 +721,32 @@ const build = defineCommand({
 });
 
 export default defineCommand({
-  meta: { name: "issues", description: "manage a local .mind event-sourced issue tracker" },
+  meta: { name: "issues", description: "a local issue tracker: add · start · done (bare `mind issues` shows the board)" },
+  // Bare `mind issues` (no subcommand) runs the board. citty runs this parent
+  // `run` on EVERY invocation — even after dispatching a subcommand — so we must
+  // bow out when a subcommand token is present (it already handled the call). A
+  // non-dash arg at this level is always a subcommand name (issues has no
+  // positional of its own); an unknown one is rejected by citty before we get
+  // here. The board args are mirrored so `mind issues --all`/`--mine` still work.
+  args: BOARD_ARGS,
+  run: guard(async ({ args, rawArgs }) => {
+    if ((rawArgs ?? []).some((a) => !a.startsWith("-"))) return; // a subcommand ran
+    return runBoard(args);
+  }),
+  // Common verbs first, advanced (coordination/setup) last — citty lists these
+  // in insertion order, so this IS the Common/More split (reinforced by the
+  // "(advanced)" prefixes in their descriptions).
   subCommands: {
-    init,
-    epic,
-    new: create,
-    create,
+    add: create,
+    start,
+    done: finish,
     list,
+    show,
     board,
     next,
-    show,
+    // advanced — multi-agent coordination + setup
+    new: create,
+    create,
     triage,
     claim,
     release,
@@ -659,6 +755,8 @@ export default defineCommand({
     comment,
     link,
     close,
+    epic,
+    init,
     build,
     fold: build,
   },

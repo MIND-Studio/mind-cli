@@ -118,7 +118,7 @@ function openEventFrontmatter(opts) {
     `actor: ${JSON.stringify(opts.authorWebId)}`,
     `actorKind: ${opts.authorKind}`,
     `at: ${opts.atIso}`,
-    "to: needs-triage",
+    "to: todo",
     `type: ${opts.type}`,
     `priority: ${opts.priority}`,
   ];
@@ -403,7 +403,7 @@ export function assertClaimable(cfg, issue, actor, { force = false } = {}) {
 export function assertClosable(issue, actor, { to, force = false } = {}) {
   if (actor.kind === "agent" && !force)
     throw new Error(
-      "agents never self-close — hand back with `mind issues handoff <ref>` (→ ready-for-human). Pass --force to override policy.",
+      "agents never self-close — hand back with `mind issues handoff <ref>` (→ review). Pass --force to override policy.",
     );
   if (issue.state === to && !force)
     throw new Error(`already ${to} — nothing to close. Pass --force to record another close event.`);

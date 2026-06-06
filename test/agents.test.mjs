@@ -79,8 +79,8 @@ test("claude backend: no persona omits append-system-prompt", () => {
 });
 
 test("issueTask: folds handle, title, body and a marching order into a prompt", () => {
-  const t = issueTask({ number: 20, category: "feature", state: "needs-triage", title: "do the thing", body: "details here" });
-  assert.match(t, /MC-20 \(feature, state: needs-triage\): do the thing/);
+  const t = issueTask({ number: 20, category: "feature", state: "todo", title: "do the thing", body: "details here" });
+  assert.match(t, /MC-20 \(feature, state: todo\): do the thing/);
   assert.match(t, /details here/);
   assert.match(t, /Do not close or hand off the issue yourself\./);
   // body-less issue still produces a usable prompt
@@ -117,7 +117,7 @@ test("agents start --no-persona dry-run launches bare codex and does not read a 
   assert.doesNotMatch(out, /SYSTEM PERSONA|--append-system-prompt|GEMINI_SYSTEM_MD/);
 });
 
-test("agents start --issue claims the issue (→ in-progress) so the queue advances", () => {
+test("agents start --issue claims the issue (→ doing) so the queue advances", () => {
   const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
   const cwd = mkdtempSync(join(tmpdir(), "mind-agents-claim-"));
   // A fake `codex` on PATH so the launch is harmless (no model call): the claim
@@ -133,7 +133,8 @@ test("agents start --issue claims the issue (→ in-progress) so the queue advan
   const made = run("issues", "new", "fix the thing", "--type", "bug", "--json");
   assert.equal(made.status, 0, made.stderr);
   const handle = `MC-${JSON.parse(made.stdout).number}`; // e.g. MC-1
-  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
+  // No triage needed: a fresh issue opens into `todo` (handoff:agent), so it's
+  // already the head of the agent queue.
 
   // A persona to launch with.
   mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
@@ -142,16 +143,16 @@ test("agents start --issue claims the issue (→ in-progress) so the queue advan
   // Before: the issue is the head of the agent queue.
   assert.match(run("issues", "next").stdout, new RegExp(handle));
 
-  // Launch the agent against it → should claim (→ in-progress), then run the fake codex.
+  // Launch the agent against it → should claim (→ doing), then run the fake codex.
   const started = run("agents", "start", "coder", "--issue", "next");
   assert.equal(started.status, 0, started.stderr || started.stdout);
   assert.match(started.stderr + started.stdout, new RegExp(`claimed ${handle}`));
 
-  // After: the issue left the agent queue, and its state is in-progress.
+  // After: the issue left the agent queue, and its state is doing.
   const after = run("issues", "next");
   assert.doesNotMatch(after.stdout, new RegExp(handle), "claimed issue must leave the agent queue");
   const shown = JSON.parse(run("issues", "show", handle, "--json").stdout);
-  assert.equal(shown.issue.state, "in-progress");
+  assert.equal(shown.issue.state, "doing");
 });
 
 test("agents start --issue --no-claim leaves the issue in the queue", () => {
@@ -165,15 +166,14 @@ test("agents start --issue --no-claim leaves the issue in the queue", () => {
 
   assert.equal(run("issues", "init").status, 0);
   const handle = `MC-${JSON.parse(run("issues", "new", "x", "--type", "bug", "--json").stdout).number}`;
-  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
   mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
   writeFileSync(join(cwd, ".mind", "agents", "coder.md"), "---\nbackend: codex\n---\nYou are coder.");
 
   const started = run("agents", "start", "coder", "--issue", "next", "--no-claim");
   assert.equal(started.status, 0, started.stderr || started.stdout);
-  // Still claimable: no claim was written, state stays ready-for-agent.
+  // Still claimable: no claim was written, state stays todo.
   assert.match(run("issues", "next").stdout, new RegExp(handle));
-  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "ready-for-agent");
+  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "todo");
 });
 
 test("agents start: a `claim: false` persona inspects an issue without claiming it", () => {
@@ -187,14 +187,13 @@ test("agents start: a `claim: false` persona inspects an issue without claiming 
 
   assert.equal(run("issues", "init").status, 0);
   const handle = `MC-${JSON.parse(run("issues", "new", "y", "--type", "bug", "--json").stdout).number}`;
-  assert.equal(run("issues", "triage", handle, "--to", "ready-for-agent").status, 0);
   mkdirSync(join(cwd, ".mind", "agents"), { recursive: true });
   writeFileSync(join(cwd, ".mind", "agents", "guide.md"), "---\nbackend: codex\nclaim: false\n---\nYou are guide (read-only).");
 
   const started = run("agents", "start", "guide", "--issue", "next");
   assert.equal(started.status, 0, started.stderr || started.stdout);
   assert.doesNotMatch(started.stderr + started.stdout, /claimed/, "a read-only persona must not claim");
-  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "ready-for-agent");
+  assert.equal(JSON.parse(run("issues", "show", handle, "--json").stdout).issue.state, "todo");
 });
 
 test("agents list --json flags personas whose backend isn't installed", () => {

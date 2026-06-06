@@ -82,13 +82,18 @@ function foldEvents(cfg, eventsDir, rel) {
   let labels = [];
   let blocks = [];
   let lastAt;
-  for (const { data } of events) {
+  // States a claim enters that therefore KEEP the holder when a non-claim event
+  // transitions into them. Covers this CLI's `doing` and the codespaces tracker's
+  // `in-progress` (the golden fold), so the holder-clear rule is correct for both.
+  const WORKING = new Set(["in-progress", "doing"]);
+  for (const { f, data } of events) {
     if (data.at != null) lastAt = data.at;
     if (data.priority != null) priority = String(data.priority);
     if (Array.isArray(data.labels)) labels = data.labels.map(String);
-    if (data.to != null) {
-      if (!stateIds.has(data.to)) fail(`${rel}/events/${f}: \`to: ${data.to}\` is not a declared state`);
-      state = data.to;
+    const to = data.to != null ? String(data.to) : null;
+    if (to != null) {
+      if (!stateIds.has(to)) fail(`${rel}/events/${f}: \`to: ${data.to}\` is not a declared state`);
+      state = to;
     }
     if (Array.isArray(data.blocks)) blocks = data.blocks.map(String);
     if (data.kind === "claim") {
@@ -97,7 +102,7 @@ function foldEvents(cfg, eventsDir, rel) {
     } else if (data.kind === "release") {
       holder = undefined;
       expiresAt = undefined;
-    } else if (data.to != null && data.to !== "in-progress") {
+    } else if (to != null && !WORKING.has(to)) {
       holder = undefined;
       expiresAt = undefined;
     }

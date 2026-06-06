@@ -9,10 +9,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 import { initTracker } from "../src/tracker/scaffold.mjs";
 import { loadConfig } from "../src/tracker/config.mjs";
@@ -43,25 +44,27 @@ test("round-trip: lifecycle folds to the right state", () => {
     createEpic(root, { title: "Onboarding", status: "active" });
     const { number } = createIssue(root, { title: "Write README", type: "docs", epicSlug: "onboarding", priority: "high" }, actor, cfg);
     assert.equal(number, 1);
-    assert.equal(stateOf(root, "MC-1"), "needs-triage");
+    assert.equal(stateOf(root, "MC-1"), "todo", "new issues open into todo");
 
+    // triage attaches labels without moving state — a fresh todo is already
+    // agent-claimable, so there's no "ready" lane to advance to.
     let issue = resolveIssue(foldTracker(root).epics, "MC-1");
-    appendEvent(root, issue, { kind: "triage", to: "ready-for-agent", extra: { labels: ["area:docs"] } }, actor, "triaged");
-    assert.equal(stateOf(root, "MC-1"), "ready-for-agent");
+    appendEvent(root, issue, { kind: "triage", extra: { labels: ["area:docs"] } }, actor, "triaged");
+    assert.equal(stateOf(root, "MC-1"), "todo");
 
     issue = resolveIssue(foldTracker(root).epics, "MC-1");
     const ttl = "PT2H";
-    appendEvent(root, issue, { kind: "claim", to: "in-progress", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } }, actor, "claimed");
-    assert.equal(stateOf(root, "MC-1"), "in-progress");
+    appendEvent(root, issue, { kind: "claim", to: "doing", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } }, actor, "claimed");
+    assert.equal(stateOf(root, "MC-1"), "doing");
     assert.equal(resolveIssue(foldTracker(root).epics, "MC-1").assignee, actor.webId);
 
     issue = resolveIssue(foldTracker(root).epics, "MC-1");
-    appendEvent(root, issue, { kind: "handoff", from: "in-progress", to: "ready-for-human" }, actor, "back to you");
-    assert.equal(stateOf(root, "MC-1"), "ready-for-human");
+    appendEvent(root, issue, { kind: "handoff", from: "doing", to: "review" }, actor, "back to you");
+    assert.equal(stateOf(root, "MC-1"), "review");
     assert.equal(resolveIssue(foldTracker(root).epics, "MC-1").assignee, undefined, "handoff clears the holder");
 
     issue = resolveIssue(foldTracker(root).epics, "MC-1");
-    appendEvent(root, issue, { kind: "close", from: "ready-for-human", to: "done", extra: { resolution: "fixed" } }, actor, "done");
+    appendEvent(root, issue, { kind: "close", from: "review", to: "done", extra: { resolution: "fixed" } }, actor, "done");
     assert.equal(stateOf(root, "MC-1"), "done");
 
     // The build trio rebuilds cleanly and the issue count is right.
@@ -80,7 +83,7 @@ test("round-trip: same-second events still fold in `at` order", () => {
     createIssue(root, { title: "Quick", type: "bug" }, actor, cfg);
     // Append several events with no delay — they share a filename second; the
     // fold must use `at` (ms) order, not the alphabetical-by-kind filename order.
-    for (const [kind, to] of [["triage", "ready-for-agent"], ["state", "blocked"], ["state", "in-progress"], ["close", "done"]]) {
+    for (const [kind, to] of [["state", "doing"], ["state", "review"], ["state", "doing"], ["close", "done"]]) {
       const issue = resolveIssue(foldTracker(root).epics, "MC-1");
       appendEvent(root, issue, { kind, to }, actor, "");
     }
@@ -118,10 +121,8 @@ test("queue: ranks by priority (urgent→low) then FIFO within a tier — the or
     createIssue(root, { title: "normal", type: "chore", priority: "normal" }, actor, cfg); // MC-3
     createIssue(root, { title: "high", type: "bug", priority: "high" }, actor, cfg); // MC-4
     createIssue(root, { title: "urgent B", type: "bug", priority: "urgent" }, actor, cfg); // MC-5
-    for (const n of [1, 2, 3, 4, 5]) {
-      const i = resolveIssue(foldTracker(root).epics, `MC-${n}`);
-      appendEvent(root, i, { kind: "triage", to: "ready-for-agent" }, actor, "");
-    }
+    // No triage step needed: a fresh issue opens into `todo`, which is
+    // handoff:agent, so it's already in the agent queue.
     const order = agentQueue({ cfg, epics: foldTracker(root).epics }).map((i) => i.number);
     // urgent (FIFO: MC-2 before MC-5) → high → normal → low
     assert.deepEqual(order, [2, 5, 4, 3, 1]);
@@ -164,11 +165,10 @@ test("queue: next drops an issue blocked by a not-done issue, includes it once t
     const dependent = createIssue(root, { title: "Dependent", type: "feature" }, actor, cfg); // MC-2
 
     // blockedBy is derived: the blocker declares `blocks: [dependent]`, so the
-    // fold links dependent.blockedBy = [blocker]. Both go ready-for-agent.
+    // fold links dependent.blockedBy = [blocker]. Both are already claimable
+    // (fresh issues open into todo = handoff:agent); triage only sets the link.
     let blk = resolveIssue(foldTracker(root).epics, "MC-1");
-    appendEvent(root, blk, { kind: "triage", to: "ready-for-agent", extra: { blocks: [dependent.id] } }, actor, "");
-    const dep = resolveIssue(foldTracker(root).epics, "MC-2");
-    appendEvent(root, dep, { kind: "triage", to: "ready-for-agent" }, actor, "");
+    appendEvent(root, blk, { kind: "triage", extra: { blocks: [dependent.id] } }, actor, "");
 
     // Sanity: the link folded as expected.
     assert.deepEqual(resolveIssue(foldTracker(root).epics, "MC-2").blockedBy, [blocker.id]);
@@ -209,7 +209,7 @@ test("blocks: triage resolves a handle/slug ref to a ULID; an unknown ref throws
     }
     const blocks = ["MC-2"].map((ref) => resolveIssue(epics0, ref).id);
     const blk = resolveIssue(epics0, "MC-1");
-    appendEvent(root, blk, { kind: "triage", to: "ready-for-agent", extra: { blocks } }, actor, "");
+    appendEvent(root, blk, { kind: "triage", extra: { blocks } }, actor, "");
 
     // The link survives the fold: MC-1 blocks MC-2, so MC-2 is blockedBy MC-1.
     assert.deepEqual(resolveIssue(foldTracker(root).epics, "MC-1").blocks, [target.id]);
@@ -246,5 +246,81 @@ test("golden: fold reproduces the codespaces build trio byte-for-byte", (t) => {
   for (const [name, content] of Object.entries(outputs)) {
     const golden = readFileSync(join(cs, ".mind", "build", name), "utf8");
     assert.equal(content, golden, `${name} drifted from the committed trio`);
+  }
+});
+
+// ── Fold validation ─────────────────────────────────────────────────────────────
+// Write a tracker BY HAND (the 4-state vocab) with one issue whose events we
+// control, and fold it — used to assert the fold's validation guarantees.
+function handTracker(root, { events }) {
+  const issueDir = join(root, ".mind", "issues", "00_general_issues", "1700000000_aaaa");
+  mkdirSync(join(issueDir, "events"), { recursive: true });
+  writeFileSync(
+    join(root, ".mind", "issues", "tracker.config.md"),
+    `---
+title: "Hand"
+namespace: "https://x/#"
+initialState: todo
+states:
+  - { id: todo, open: true }
+  - { id: doing, open: true }
+  - { id: review, open: true }
+  - { id: done, open: false }
+categories:
+  - { id: bug }
+---
+`,
+    "utf8",
+  );
+  writeFileSync(
+    join(issueDir, "issue.md"),
+    `---
+id: 01TESTTESTTESTTESTOPEN0001
+slug: legacy
+type: bug
+title: "Legacy"
+author: "urn:mind:local:t"
+authorKind: human
+created: 2026-01-01T00:00:00.000Z
+afk: false
+---
+`,
+    "utf8",
+  );
+  events.forEach((fm, idx) =>
+    writeFileSync(join(issueDir, "events", `2026-01-01-00000${idx}-t-${fm.kind}.md`), `---\n${fm.body}\n---\n`, "utf8"),
+  );
+}
+
+test("fold: an event `to:` outside the declared vocab hard-fails (typos aren't swallowed)", () => {
+  const root = mkdtempSync(join(tmpdir(), "mind-badstate-"));
+  try {
+    handTracker(root, {
+      events: [
+        { kind: "open", body: 'id: 01OPEN\nkind: open\nactor: "urn:mind:local:t"\nactorKind: human\nat: 2026-01-01T00:00:00.000Z\nto: bogus-state\ntype: bug\npriority: normal' },
+      ],
+    });
+    // The message must name the offending event file (proves the loop destructures
+    // `f` — without it this path threw `ReferenceError: f is not defined`, MC-24).
+    assert.throws(() => foldTracker(root), /events\/2026-01-01-000000-t-open\.md: `to: bogus-state` is not a declared state/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("default command: bare `mind issues` prints the board", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-default-"));
+  try {
+    const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1" };
+    const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+    assert.equal(run("issues", "init").status, 0);
+    assert.equal(run("issues", "add", "Fix the thing").status, 0, "add takes no required flags");
+    const bare = run("issues"); // no subcommand → the board
+    assert.equal(bare.status, 0, bare.stderr);
+    assert.match(bare.stdout, /to do/, "board shows the todo lane");
+    assert.match(bare.stdout, /Fix the thing/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
   }
 });

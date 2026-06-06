@@ -303,7 +303,7 @@ const start = defineCommand({
       issueRef = `MC-${issue.number ?? "?"}`;
       task = issueTask(issue);
     }
-    // Claim the issue (→ in-progress) so it leaves the agent queue — otherwise
+    // Claim the issue (→ doing) so it leaves the agent queue — otherwise
     // `--issue next` keeps resurfacing the same issue every run. `--no-claim`
     // keeps the old loose coupling (read the body, don't touch tracker state);
     // a persona with `claim: false` (read-only personas like `guide`) opts out too.
@@ -321,7 +321,7 @@ const start = defineCommand({
 
     if (args["dry-run"]) {
       emit({ backend: backendName, bin, args: argv, env, cwd: root, interactive, issue: issueRef, claim: willClaim, task }, () => {
-        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef + (willClaim ? dim(" (would claim → in-progress)") : dim(" (no-claim)")) : ""}`);
+        console.log(`${dim("backend")} ${cyan(backendName)}  ${dim("cwd")} ${rel(root) || "."}  ${dim(interactive ? "(interactive)" : "(headless)")}${issueRef ? "  " + dim("issue ") + issueRef + (willClaim ? dim(" (would claim → doing)") : dim(" (no-claim)")) : ""}`);
         console.log(`${dim("$")} ${bin} ${argv.join(" ")}`);
         if (task) console.log(`\n${dim("task:")}\n${task}`);
       });
@@ -331,9 +331,9 @@ const start = defineCommand({
     if (!onPath(backend.bin))
       throw new Error(`backend "${backendName}" not found on PATH (${backend.bin}). Install: ${backend.install}`);
 
-    // Claim before launching: transitions the issue to in-progress so a re-run of
+    // Claim before launching: transitions the issue to doing so a re-run of
     // `--issue next` advances to the next issue instead of re-picking this one. A
-    // crash mid-run leaves it in-progress until the claim's ttl lapses, then it
+    // crash mid-run leaves it doing until the claim's ttl lapses, then it
     // returns to the queue (the ⏱ stale mark). Placed after the PATH check so a
     // missing backend doesn't leave a spurious claim.
     if (willClaim) {
@@ -347,11 +347,11 @@ const start = defineCommand({
       appendEvent(
         root,
         issue,
-        { kind: "claim", to: "in-progress", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } },
+        { kind: "claim", to: "doing", extra: { ttl, expiresAt: addDuration(new Date(), ttl).toISOString() } },
         actor,
         "Claimed by agent on launch.",
       );
-      process.stderr.write(`${sym.ok} claimed ${bold(issueRef)} ${dim(`→ in-progress (ttl ${ttl})`)}\n`);
+      process.stderr.write(`${sym.ok} claimed ${bold(issueRef)} ${dim(`→ doing (ttl ${ttl})`)}\n`);
     }
 
     // Expose the active Solid identity to the child as context (the backend still

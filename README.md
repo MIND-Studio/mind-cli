@@ -14,7 +14,7 @@ mind whoami                      # who am I right now
 mind ls / · cat <p> · put <p> -  # read/write the active identity's pod
 mind grant <webid> <p> --modes r # share part of your pod (WAC)
 mind codespaces repos            # a plugin: drive the Solid Git bridge
-mind issues new "Fix it" --type bug   # a plugin: manage a local .mind tracker
+mind issues add "Fix it"         # a plugin: manage a local .mind tracker (add · start · done)
 mind issues next --claim         #   …and the agent loop: grab the next ready issue
 mind agents start coder          # a plugin: launch a local CLI coding agent (codex) with a persona
 ```
@@ -34,8 +34,9 @@ curl -fsSL https://raw.githubusercontent.com/MIND-Studio/mind-cli/main/install.s
 ```
 
 This fetches the latest release, installs its deps, and puts a `mind` launcher in
-`~/.local/bin`. Re-run it any time to update. Overridable via `MIND_CLI_REF`
-(pin a tag/branch), `MIND_CLI_HOME` (source dir), `MIND_CLI_BIN` (launcher dir).
+`~/.local/bin`. Re-run it any time to update, or run `mind update`. Overridable
+via `MIND_CLI_REF` (pin a tag/branch), `MIND_CLI_HOME` (source dir),
+`MIND_CLI_BIN` (launcher dir).
 
 To inspect before running (it's `curl | bash`, after all):
 
@@ -111,6 +112,7 @@ mind ls / --json
 | `mind id show [name]` | print an identity, secrets redacted |
 | `mind id import <creds.json> [--name N]` | adopt an existing creds file |
 | `mind whoami` | live-verify and print the active identity |
+| `mind update [--ref tag\|branch] [--dry-run]` | update the CLI by re-running the installer (`upgrade` alias) |
 
 ### Pod I/O (as the active identity)
 Paths are pod-relative, or absolute `http(s)://` URLs (for cross-pod access you've been granted).
@@ -164,7 +166,7 @@ working directory. First plugin to shell out — `node:child_process.spawn` with
 | `mind agents start <persona>` | interactive: hand over the backend's TUI with the persona injected |
 | `mind agents start <persona> -p "<task>"` | headless: run the task, print the result, exit (child's exit code propagates) |
 | `mind agents start <persona> --no-persona -p "<task>"` | launch the bare backend in the repo cwd; task/issue handling still works, but no system prompt is injected or read |
-| `mind agents start <persona> --issue MC-N` | **load a tracker issue** (ULID/`MC-N`/slug, or `next` for the top of the agent queue) as the task — folds its title+body into the prompt, then **claims it** (→ `in-progress`, with the config ttl) so a re-run of `--issue next` advances to the next issue instead of re-picking this one. It never *closes* the issue — a human reviews and closes. Pass `--no-claim` to read the issue without touching tracker state, `--force` to steal a live claim, or `--dry-run` to print the resolved backend/argv/task (and whether it would claim) without spawning |
+| `mind agents start <persona> --issue MC-N` | **load a tracker issue** (ULID/`MC-N`/slug, or `next` for the top of the agent queue) as the task — folds its title+body into the prompt, then **claims it** (→ `doing`, with the config ttl) so a re-run of `--issue next` advances to the next issue instead of re-picking this one. It never *closes* the issue — a human reviews and closes. Pass `--no-claim` to read the issue without touching tracker state, `--force` to steal a live claim, or `--dry-run` to print the resolved backend/argv/task (and whether it would claim) without spawning |
 
 Backends are **pluggable** (`--backend codex\|claude\|gemini`, or the persona's
 `backend:`; **codex** is the default). Persona injection differs per CLI: codex
@@ -179,21 +181,32 @@ markdown-folder + append-only `events/` format the codespaces bridge folds into
 `build/*.ttl`). Operates on the `.mind/` of the repo you're in (walks up from cwd
 like git); state is the **fold** of each issue's events, never a stored field.
 Fully standalone — its own fold + Turtle renderer (a faithful port of the
-codespaces `tracker-build`), no bridge or server required:
+codespaces `tracker-build`), no bridge or server required.
+
+The everyday path is three verbs — no flags, no ceremony — over four lanes
+(**todo · doing · review · done**). Bare `mind issues` shows the board:
+
+| | |
+|---|---|
+| `mind issues add "<title>"` | file an issue (no required flags; `--type` optional, defaults to `chore`) → **todo** |
+| `mind issues` _(or_ `board`_)_ | the board: issues in lanes todo · doing · review · done (Done collapsed; `--all` to show) |
+| `mind issues start <ref>` | you're working on it → **doing** |
+| `mind issues done <ref>` | finished → **done** |
+| `mind issues show <ref>` | one issue: facts + body + a plain-English **activity feed** |
+
+Coordination & setup verbs (the `(advanced)` group in `--help`) drive multi-agent work:
 
 | | |
 |---|---|
 | `mind issues init [--title T] [--namespace IRI]` | scaffold a fresh `.mind/` tracker here |
 | `mind issues epic <title> [--status S]` | create an epic (a goal grouping issues) |
-| `mind issues new "<title>" --type T [--priority P] [--epic SLUG]` | create an issue (interactive if `<title>` omitted) |
+| `mind issues new "<title>" [--type T] [--priority P] [--epic SLUG]` | create an issue (alias of `add`; interactive if `<title>` omitted) |
 | `mind issues list [--state/--type/--priority/--epic/--label/--mine/--open/--closed]` | folded list, grouped by epic (priority shown as a leading `↑`/`‼`/`↓` glyph) |
-| `mind issues board [same filters as list]` | kanban view: the same issues grouped into **state lanes** (workflow order), each tagged with its epic |
 | `mind issues next [--claim] [--all]` | pick the next claimable issue for an agent (priority then lowest-ULID; `--claim` claims it; `--all` shows the whole ranked queue, read-only) |
-| `mind issues show <ref>` | one issue: folded facts + body + event timeline |
 | `mind issues triage <ref> --to S [--labels a,b] [--blocks REF,…]` | append a triage event (`--blocks` refs accept any form — ULID/`MC-N`/`#N`/`N`/slug — and are rejected if they don't resolve) |
-| `mind issues claim/release <ref>` | claim (→ in-progress, ttl) / release a claim |
-| `mind issues state <ref> --to S` · `handoff <ref>` · `comment <ref> -m …` · `link <ref> --pr B` | other lifecycle events |
-| `mind issues close <ref> [--to done\|wontfix]` | close an issue |
+| `mind issues claim/release <ref>` | claim (→ doing, ttl) / release a claim |
+| `mind issues state <ref> --to S` · `handoff <ref>` _(→ review)_ · `comment <ref> -m …` · `link <ref> --pr B` | other lifecycle events |
+| `mind issues close <ref> [--to done\|wontfix]` | close an issue (humans only; agents `handoff` to review) |
 | `mind issues build [--check]` | regenerate `build/{tracker,epics,state}.ttl` (`--check` = drift gate) |
 
 `<ref>` is a ULID, an `MC-NNNN`/`#NNNN`/`NNNN` display handle, or a slug. Events

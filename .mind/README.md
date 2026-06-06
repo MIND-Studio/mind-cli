@@ -7,7 +7,7 @@ state of everything is *derived* — never hand-set.
 > **The path carries immutable context. The `events/` log carries state.**
 
 A folder name only ever encodes facts that never change — the epic, the date it was filed.
-Everything that *moves* — open → in-progress → done, who claimed it, priority, labels — lives in
+Everything that *moves* — todo → doing → review → done, who claimed it, priority, labels — lives in
 the issue's `events/` log. Current state is the **fold** of that log.
 
 ## Layout
@@ -35,10 +35,12 @@ the issue's `events/` log. Current state is the **fold** of that log.
 ## Drive it with the mind CLI
 
 ```bash
-mind issues new "Fix the thing" --type bug --priority high
-mind issues list
-mind issues show MC-1
-mind issues triage MC-1 --to ready-for-agent --labels area:io
-mind issues claim MC-1
-mind issues close MC-1 --to done
+mind issues add "Fix the thing"   # file it (todo)
+mind issues                       # the board: todo · doing · review · done
+mind issues start MC-1            # you're on it (→ doing)
+mind issues done MC-1             # finished (→ done)
+mind issues show MC-1            # the full story, as an activity feed
 ```
+
+Coordination verbs (claim/handoff/triage/close/build, `--agent`, ttls) are still there for
+multi-agent work — see `mind issues --help`.
