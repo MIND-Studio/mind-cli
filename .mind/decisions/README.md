@@ -14,11 +14,11 @@ milestones-as-calendar, identity, layout, storage-vs-agent-input, AI-suggests-hu
 **not** mind-cli decisions — they're design rationale for the Mind *issues* app and for Mind's base
 human+agent collaboration. They live in the Mind decision log:
 
-- **Tracker-app design** → `architecture/src/decisions/apps/issues/` (0001–0005)
-- **Cross-cutting base** → `architecture/src/decisions/architecture/` (0008 storage-vs-agent-input,
+- **Tracker-app design** → `src/decisions/apps/issues/` (0001–0005)
+- **Cross-cutting base** → `src/decisions/architecture/` (0008 storage-vs-agent-input,
   0009 AI-suggests-humans-commit)
 
-(From this folder: `../../../../architecture/src/decisions/`.)
+(In the spec repo: https://github.com/MIND-Studio/mind-specification — under `src/decisions/`.)
 
 Keeping them there means any project that adopts this tracker format shares one rationale, and a
 project's own `decisions/` stays about *that project*.

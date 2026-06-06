@@ -3,7 +3,7 @@
 - **Status:** proposed (recommendation; not yet implemented)
 - **Date:** 2026-06-05
 - **Tracks:** MC-15 (`codespaces: wire real OIDC for production bridge auth`)
-- **Scope:** mind-cli (`plugins/codespaces.mjs`) + mind-codespaces-v0 (the bridge)
+- **Scope:** mind-cli (`plugins/codespaces.mjs`) + codespaces (the bridge)
 
 ## Context
 
@@ -65,7 +65,7 @@ Keep it as the human-friendly option, not the critical path.
 - **mind-cli:** in `plugins/codespaces.mjs`, replace the `X-Mind-Dev-WebId` header with
   `Authorization: DPoP <token>` minted from the active identity's stored client-credentials. The
   `isLocalBridge` warning (MC-16) stays as a fallback for the dev-header path during transition.
-- **mind-codespaces-v0 (the bridge):** stop trusting the dev header in production; instead verify the
+- **codespaces (the bridge):** stop trusting the dev header in production; instead verify the
   Solid-OIDC token and derive the WebID from it. **This is why MC-15 is a "design first" task — it is
   a change in two repos, not just the CLI.**
 - **Humans without a creds file:** a later `mind id login` (interactive loopback) can mint

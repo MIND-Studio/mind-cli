@@ -138,7 +138,7 @@ test("actor: WebID label surfaces the account, never the literal `card`", () => 
     ["https://pod.mindpods.org/mind-agent-01/profile/card#me", "mind-agent-01"],
     ["http://localhost:3011/claude/profile/card#me", "claude"],
     ["https://alice.example/profile/card#me", "alice"], // card at host root → host label
-    ["urn:mind:local:heussers", "heussers"],
+    ["urn:mind:local:sam", "sam"],
     ["https://example.org/people/dan#me", "dan"], // non-card WebID → last segment
   ];
   for (const [webId, want] of cases) {
