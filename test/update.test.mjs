@@ -59,5 +59,9 @@ test("mind --help lists update", () => {
     encoding: "utf8",
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^\s+update\s+update the CLI by re-running the installer/m);
+  // When colors are on (e.g. CI's FORCE_COLOR) citty decorates command names with
+  // ANSI codes and/or backticks; strip ANSI and allow optional backticks so the
+  // assertion holds in both colored and plain output.
+  const plain = r.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(plain, /^\s+`?update`?\s+update the CLI by re-running the installer/m);
 });
