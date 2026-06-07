@@ -246,3 +246,17 @@ prototype/bridge.
   DPoP, client-credentials) only has a mature implementation in JS. A Rust
   rewrite would mean reimplementing DPoP/OIDC; revisit only if a single static
   binary becomes a hard requirement.
+
+## Releases
+
+Versioning, `CHANGELOG.md`, and tags are automated with
+[release-please](https://github.com/googleapis/release-please) — **don't tag or
+edit `CHANGELOG.md` by hand.**
+
+1. Commit to `main` using [Conventional Commits](https://www.conventionalcommits.org):
+   `fix:` → patch, `feat:` → minor, `feat!:` / `BREAKING CHANGE:` → major.
+   `chore:` / `docs:` / `refactor:` / `test:` don't trigger a release.
+2. release-please keeps an open **"chore(main): release X.Y.Z"** PR that rolls the
+   pending commits into `CHANGELOG.md` and bumps the version.
+3. Merge that PR to release: it creates the `vX.Y.Z` tag + GitHub Release and
+   updates `CHANGELOG.md`. (Publishing is still manual — no publish workflow yet.)
