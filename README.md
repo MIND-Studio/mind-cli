@@ -137,7 +137,7 @@ Paths are pod-relative, or absolute `http(s)://` URLs (for cross-pod access you'
 
 **`chat`** — post to and tail a Solid **long-chat** room as the active identity
 (same WebID you drive with `ls`/`put`/`grant`). Self-contained raw turtle over
-`session.fetch` — no SDK. Room defaults to `pod.mindpods.org/testuser/chat/general`
+`session.fetch` — no SDK. Room defaults to `pods.mindpods.org/testuser/chat/general`
 (override with `--room <url>` or `$MIND_CHAT_ROOM`):
 | | |
 |---|---|
@@ -237,7 +237,7 @@ prototype/bridge.
 ## Notes & limits
 
 - **Local-first.** Default issuer is the mind-codespaces local CSS `:3011`.
-  Point at production with `--issuer https://pod.mindpods.org/`.
+  Point at production with `--issuer https://pods.mindpods.org/`.
 - An identity only works while its CSS is up, and its creds go stale if that
   server's `.css-data/` is wiped — just `mind id create` again.
 - By default a WebID can only touch its **own** pod; `mind grant` (run by the

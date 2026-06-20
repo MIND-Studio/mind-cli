@@ -26,7 +26,7 @@ test("isLocalIssuer / isLocalBridge: loopback hosts are local, prod is not", () 
     assert.equal(fn("http://127.0.0.1:3010"), true);
     assert.equal(fn("http://[::1]:3010/"), true, "ipv6 loopback, brackets stripped");
     assert.equal(fn("http://my-box.local/"), true, "mDNS .local");
-    assert.equal(fn("https://pod.mindpods.org/"), false, "production pod is remote");
+    assert.equal(fn("https://pods.mindpods.org/"), false, "production pod is remote");
     assert.equal(fn("https://codespaces.mindpods.org"), false);
     assert.equal(fn("not a url"), false, "unparseable → not local (fail safe: still warn/guide)");
   }

@@ -17,7 +17,7 @@ import { getActive, STORE_ROOT } from "../src/store.mjs";
 import { loginAs } from "../src/solid.mjs";
 import { emit, table, spin, guard, sym, green, dim, cyan, yellow } from "../src/ui.mjs";
 
-const DEFAULT_ROOM = "https://pod.mindpods.org/testuser/chat/general";
+const DEFAULT_ROOM = "https://pods.mindpods.org/testuser/chat/general";
 const ROOM_ARG = { room: { type: "string", description: "room container URL (default: testuser/general)" } };
 const J = { json: { type: "boolean", description: "machine-readable JSON output" } };
 

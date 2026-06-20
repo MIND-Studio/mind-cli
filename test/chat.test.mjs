@@ -15,7 +15,7 @@ import {
 
 test("dayFileUrl/dayContainerUrl: UTC-partitioned path, room trailing slash stripped", () => {
   const d = new Date("2026-06-05T20:03:47.436Z");
-  const room = "https://pod.mindpods.org/testuser/chat/general";
+  const room = "https://pods.mindpods.org/testuser/chat/general";
   assert.equal(dayContainerUrl(room, d), `${room}/2026/06/05/`);
   assert.equal(dayFileUrl(room, d), `${room}/2026/06/05/chat.ttl`);
   // Single-digit month/day are zero-padded; uses UTC, not local time.
@@ -24,7 +24,7 @@ test("dayFileUrl/dayContainerUrl: UTC-partitioned path, room trailing slash stri
 });
 
 test("handleOf: first WebID path segment is the handle", () => {
-  assert.equal(handleOf("https://pod.mindpods.org/mind-agent-01/profile/card#me"), "mind-agent-01");
+  assert.equal(handleOf("https://pods.mindpods.org/mind-agent-01/profile/card#me"), "mind-agent-01");
   assert.equal(handleOf("http://localhost:3031/alice/profile/card#me"), "alice");
   assert.equal(handleOf(""), "?");
 });
@@ -44,14 +44,14 @@ test("unescapeTtl: decodes turtle \\uXXXX / \\UXXXXXXXX (how CSS serialises non-
 });
 
 test("parseMessages: extracts messages, sorts by created, skips incomplete", () => {
-  const dayUrl = "https://pod.mindpods.org/testuser/chat/general/2026/06/05/chat.ttl";
+  const dayUrl = "https://pods.mindpods.org/testuser/chat/general/2026/06/05/chat.ttl";
   const ttl = `
 <#this> <http://www.w3.org/ns/pim/meeting#message> <#msg-b>, <#msg-a> .
 <#msg-b> <http://rdfs.org/sioc/ns#content> "second \\U0001f44b" ;
-  <http://xmlns.com/foaf/0.1/maker> <https://pod.mindpods.org/huhn/profile/card#me> ;
+  <http://xmlns.com/foaf/0.1/maker> <https://pods.mindpods.org/huhn/profile/card#me> ;
   <http://purl.org/dc/terms/created> "2026-06-05T20:04:00.000Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
 <#msg-a> <http://rdfs.org/sioc/ns#content> "first" ;
-  <http://xmlns.com/foaf/0.1/maker> <https://pod.mindpods.org/alice/profile/card#me> ;
+  <http://xmlns.com/foaf/0.1/maker> <https://pods.mindpods.org/alice/profile/card#me> ;
   <http://purl.org/dc/terms/created> "2026-06-05T20:03:00.000Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
 <#msg-broken> <http://rdfs.org/sioc/ns#content> "no maker or date" .
 `;
@@ -63,7 +63,7 @@ test("parseMessages: extracts messages, sorts by created, skips incomplete", () 
     "sorted by created ascending; unicode decoded",
   );
   assert.equal(msgs[0].url, `${dayUrl}#msg-a`);
-  assert.equal(msgs[1].author, "https://pod.mindpods.org/huhn/profile/card#me");
+  assert.equal(msgs[1].author, "https://pods.mindpods.org/huhn/profile/card#me");
 });
 
 test("parseMessages: empty / no-message turtle → []", () => {

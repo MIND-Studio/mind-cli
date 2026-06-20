@@ -23,24 +23,33 @@ const J = { json: { type: "boolean", description: "machine-readable JSON output"
 const DIR = { dir: { type: "string", description: "target project dir (default: cwd)" } };
 
 // ── source resolution ────────────────────────────────────────────────────────
-// 1) $MIND_SKILLS_SRC  2) sibling of the CLI (mind-cli/../mind-skills)
-// 3) walk up from cwd looking for mind-skills/skills
+// 1) $MIND_SKILLS_SRC  2) sibling of the CLI (mind-cli/../skills)
+// 3) walk up from cwd looking for <bundle>/skills
+// The bundle repo is `skills` (re-clone dropped the `mind-` prefix); `mind-skills`
+// stays in the list for back-compat with older checkouts.
+const BUNDLE_DIRS = ["skills", "mind-skills"];
+// A real bundle is a dir whose `skills/` holds at least one <name>/SKILL.md —
+// guards the generic name "skills" against matching unrelated folders.
+function isBundle(skillsDir) {
+  if (!existsSync(skillsDir) || !statSync(skillsDir).isDirectory()) return false;
+  return readdirSync(skillsDir).some((n) => existsSync(join(skillsDir, n, "SKILL.md")));
+}
 function resolveSource() {
   const cands = [];
   if (process.env.MIND_SKILLS_SRC) cands.push(process.env.MIND_SKILLS_SRC);
-  cands.push(join(HERE, "..", "..", "mind-skills"));
+  for (const b of BUNDLE_DIRS) cands.push(join(HERE, "..", "..", b));
   let d = process.cwd();
-  for (let i = 0; i < 8; i++) { cands.push(join(d, "mind-skills")); d = dirname(d); }
+  for (let i = 0; i < 8; i++) { for (const b of BUNDLE_DIRS) cands.push(join(d, b)); d = dirname(d); }
   for (const c of cands) {
     const skills = join(c, "skills");
-    if (existsSync(skills) && statSync(skills).isDirectory()) {
+    if (isBundle(skills)) {
       let manifest = {};
       try { manifest = JSON.parse(readFileSync(join(c, "manifest.json"), "utf8")); } catch {}
       return { root: resolve(c), skillsDir: skills, manifest };
     }
   }
   throw new Error(
-    "cannot find the mind-skills source bundle. Set MIND_SKILLS_SRC, or run from inside the mind-prototypes workspace.",
+    "cannot find the mind-skills source bundle. Set MIND_SKILLS_SRC, or run from inside the mind workspace (expects a sibling `skills/` repo).",
   );
 }
 
@@ -156,9 +165,10 @@ const install = defineCommand({
     force: { type: "boolean", description: "reinstall even if unchanged" },
     ...DIR, ...J,
   },
-  run: guard(async ({ args, rawArgs }) => {
+  run: guard(async ({ args }) => {
     const src = listSource();
-    const wanted = (rawArgs || []).filter((a) => !a.startsWith("-"));
+    // args._ holds only positionals — never flag values like `--dir <path>`.
+    const wanted = args._ || [];
     const names = wanted.length ? wanted : src.map((s) => s.name);
     const unknown = names.filter((n) => !src.some((s) => s.name === n));
     if (unknown.length) throw new Error(`unknown skill(s): ${unknown.join(", ")}`);
@@ -215,8 +225,8 @@ const remove = defineCommand({
     names: { type: "positional", required: true, description: "skill names to remove" },
     ...DIR, ...J,
   },
-  run: guard(async ({ args, rawArgs }) => {
-    const names = (rawArgs || []).filter((a) => !a.startsWith("-"));
+  run: guard(async ({ args }) => {
+    const names = args._ || [];
     if (!names.length) throw new Error("name at least one skill to remove");
     const target = targetDir(args);
     const lock = readLock(target);

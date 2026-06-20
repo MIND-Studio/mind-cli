@@ -135,7 +135,7 @@ test("actor: WebID label surfaces the account, never the literal `card`", () => 
   // Solid WebIDs almost always end in /profile/card#me — a naive last-segment
   // would collapse every identity to "card". The account name must win instead.
   const cases = [
-    ["https://pod.mindpods.org/mind-agent-01/profile/card#me", "mind-agent-01"],
+    ["https://pods.mindpods.org/mind-agent-01/profile/card#me", "mind-agent-01"],
     ["http://localhost:3011/claude/profile/card#me", "claude"],
     ["https://alice.example/profile/card#me", "alice"], // card at host root → host label
     ["urn:mind:local:sam", "sam"],
@@ -145,7 +145,7 @@ test("actor: WebID label surfaces the account, never the literal `card`", () => 
     assert.equal(displayName(webId), want, `displayName(${webId})`);
     assert.notEqual(displayName(webId), "card", `displayName(${webId}) must not be "card"`);
   }
-  assert.equal(actorTag("https://pod.mindpods.org/mind-agent-01/profile/card#me"), "mindagent01");
+  assert.equal(actorTag("https://pods.mindpods.org/mind-agent-01/profile/card#me"), "mindagent01");
 });
 
 test("diff: unifiedDiff marks changed lines and is empty when equal", () => {
@@ -320,6 +320,33 @@ test("default command: bare `mind issues` prints the board", () => {
     assert.equal(bare.status, 0, bare.stderr);
     assert.match(bare.stdout, /to do/, "board shows the todo lane");
     assert.match(bare.stdout, /Fix the thing/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("`issues state --to <closed> --agent` is blocked (no self-close escape hatch)", () => {
+  const bin = new URL("../bin/mind.mjs", import.meta.url).pathname;
+  const cwd = mkdtempSync(join(tmpdir(), "mind-selfclose-"));
+  try {
+    const env = { ...process.env, MIND_HOME: join(cwd, "home"), NO_COLOR: "1" };
+    const run = (...a) => spawnSync(process.execPath, [bin, ...a], { cwd, env, encoding: "utf8" });
+    assert.equal(run("issues", "init").status, 0);
+    assert.equal(run("issues", "add", "Do it", "--agent").status, 0);
+    assert.equal(run("issues", "claim", "MC-1", "--agent").status, 0);
+
+    // generic `state` into a closed state must hit the same guard as close/done
+    const blocked = run("issues", "state", "MC-1", "--to", "done", "--agent");
+    assert.notEqual(blocked.status, 0, "agent self-close via `state` should fail");
+    assert.match(blocked.stderr, /never self-close/);
+
+    // a transition into an OPEN state is fine for an agent
+    assert.equal(run("issues", "state", "MC-1", "--to", "review", "--agent").status, 0,
+      "agent → open state is allowed");
+
+    // --force is the explicit escape hatch
+    assert.equal(run("issues", "state", "MC-1", "--to", "done", "--agent", "--force").status, 0,
+      "--force overrides the self-close guard");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
