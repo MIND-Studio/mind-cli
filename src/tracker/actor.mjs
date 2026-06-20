@@ -16,7 +16,7 @@ function localUrnName(webId) {
  * The human label for a WebID — the account/pod name, not the literal path tail.
  *
  * Solid WebIDs almost universally end in `/profile/card#me`
- * (e.g. `https://pod.mindpods.org/mind-agent-01/profile/card#me`), so a naive
+ * (e.g. `https://pods.mindpods.org/mind-agent-01/profile/card#me`), so a naive
  * "last path segment" collapses *every* identity to `card`. We strip the
  * canonical card location first, then take the remaining last path segment
  * (`mind-agent-01`); if the card sat at the host root (`https://alice.example/

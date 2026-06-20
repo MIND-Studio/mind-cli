@@ -580,9 +580,16 @@ const release = eventCmd({
 const state = eventCmd({
   name: "state",
   description: "(advanced) generic state transition",
-  extraArgs: { to: { type: "string", required: true, description: "target state" } },
-  build: ({ args, cfg }) => {
-    requireState(cfg, args.to);
+  extraArgs: {
+    to: { type: "string", required: true, description: "target state" },
+    force: { type: "boolean", description: "override the agents-never-self-close guard when --to is a closed state" },
+  },
+  build: ({ args, cfg, issue, actor }) => {
+    const s = requireState(cfg, args.to);
+    // A transition INTO a closed state is a close — the no-self-close policy must
+    // hold here too, else `state --to done --agent` is an escape hatch around the
+    // dedicated close/done verbs.
+    if (!s.open) assertClosable(issue, actor, { to: args.to, force: args.force });
     return { kind: "state", to: args.to };
   },
 });
