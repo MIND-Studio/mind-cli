@@ -85,8 +85,13 @@ test("skills remove --dir removes only the named skill, not the dir path", () =>
   }
 });
 
-test("skills source resolves a sibling `skills/` bundle (post-rename name)", () => {
+test("skills source resolves a sibling `skills/` bundle (post-rename name)", (t) => {
   // No MIND_SKILLS_SRC: must fall back to the real sibling `skills` repo.
+  // Only meaningful in a dev checkout where that sibling exists (skipped in CI).
+  if (!existsSync(new URL("../../skills/manifest.json", import.meta.url))) {
+    t.skip("sibling skills bundle not present");
+    return;
+  }
   const r = spawnSync(process.execPath, ["bin/mind.mjs", "skills", "list", "--json"], {
     cwd: ROOT,
     encoding: "utf8",
